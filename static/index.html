@@ -48,8 +48,13 @@
             font-family: -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", sans-serif;
             background: var(--md-surface-1); color: var(--md-on-surface); line-height: 1.5;
             overflow: hidden;
+            display: flex; flex-direction: column;
         }
-        .view { position: fixed; inset: 0; display: flex; flex-direction: column; }
+        /* 视图用文档流布局(非 fixed):Android WebView 键盘弹出时页面自然收缩,输入框不被遮挡 */
+        .view {
+            flex: 1; min-height: 0; position: relative;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
         .view.hidden { display: none; }
 
         /* ===== 顶部栏 ===== */
@@ -95,7 +100,7 @@
             background: var(--md-surface); color: var(--md-on-surface);
         }
 
-        /* ===== 播放器视图 ===== */
+        /* 播放器视图 */
         #playerView { background: var(--md-surface); }
         .bg-blur {
             position: absolute; inset: 0; z-index: 0; pointer-events: none;

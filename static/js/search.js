@@ -11,7 +11,11 @@ window.searchGo = function () {
   const kw = el('searchInput').value.trim()
   const st = el('searchStatus')
   const btn = el('searchGoBtn')
-  if (!kw) { setStatus(st, '请输入关键词', 'err'); return }
+  if (!kw) {
+    setStatus(st, '请输入关键词', 'err')
+    el('searchInput').focus()
+    return
+  }
   btn.disabled = true
   setStatus(st, '搜索中…')
   api('api/search', { method: 'POST', body: JSON.stringify({ keyword: kw }) })
