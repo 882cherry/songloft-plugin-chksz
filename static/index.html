@@ -358,7 +358,7 @@
         <header class="app-bar">
             <button class="btn-icon" id="backToPlayerBtn" title="返回播放器"><span class="material-symbols-outlined">arrow_back</span></button>
             <input type="text" class="text-field" id="searchInput" placeholder="搜索歌手、歌曲…" onkeydown="if(event.key==='Enter')window.searchGo&&searchGo()">
-            <button class="btn-filled" id="searchGoBtn">搜索</button>
+            <button class="btn-filled" id="searchGoBtn" onclick="window.searchGo&&searchGo()">搜索</button>
         </header>
         <div class="container">
             <div class="status muted" id="searchStatus"></div>

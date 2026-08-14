@@ -1,33 +1,43 @@
 // app.js — 入口:初始化各模块、绑定面板
+// 每个模块独立 try/catch 隔离:单个模块失败不影响其他(尤其保证搜索可用)
 
 import { bindSheet, snackbar } from './util.js'
 import { hasClientPlayer } from './api.js'
 import { initPlayer, getState } from './player.js'
 import { initSearch } from './search.js'
-import { initConfig, openConfig, checkKeyStatus } from './config.js'
+import { initConfig, checkKeyStatus } from './config.js'
 import { initLyrics } from './lyrics.js'
 
 function el(id) { return document.getElementById(id) }
 
-function init() {
-  // 播放器(核心)
-  initPlayer()
+function safe(fn, name) {
+  try {
+    fn()
+  } catch (e) {
+    console.error('[chksz] init ' + name + ' failed:', e)
+    try { snackbar('初始化 ' + name + ' 失败') } catch (_) { /* ignore */ }
+  }
+}
 
-  // 搜索
-  initSearch()
+function init() {
+  // 播放器(核心)——失败不影响搜索
+  safe(initPlayer, 'player')
+
+  // 搜索(最高优先级:即使其他全挂也要保证可用)
+  safe(initSearch, 'search')
 
   // 配置弹窗(左上角图标)
-  initConfig(checkKeyStatus)
+  safe(() => initConfig(checkKeyStatus), 'config')
 
   // 底部面板:队列 / 音量
-  bindSheet('queueBackdrop', 'queueSheet', el('queueBtn'), [])
-  bindSheet('volumeBackdrop', 'volumeSheet', el('volumeBtn'), [])
+  safe(() => bindSheet('queueBackdrop', 'queueSheet', el('queueBtn'), []), 'queue')
+  safe(() => bindSheet('volumeBackdrop', 'volumeSheet', el('volumeBtn'), []), 'volume')
 
   // 歌词同步(读播放器当前进度)
-  initLyrics(() => getState().current_time)
+  safe(() => initLyrics(() => getState().current_time), 'lyrics')
 
   // 首次加载静默检查 Key
-  checkKeyStatus()
+  safe(checkKeyStatus, 'keyStatus')
 
   // 宿主不可用时提示
   if (!hasClientPlayer()) {

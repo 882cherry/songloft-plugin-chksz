@@ -6,16 +6,7 @@ import { playSongs, addToQueue, showPlayerView } from './player.js'
 
 function el(id) { return document.getElementById(id) }
 
-export function initSearch() {
-  el('searchBtn').addEventListener('click', () => {
-    el('playerView').classList.add('hidden')
-    el('searchView').classList.remove('hidden')
-    el('searchInput').focus()
-  })
-  el('backToPlayerBtn').addEventListener('click', showPlayerView)
-  el('searchGoBtn').addEventListener('click', searchGo)
-}
-
+// 搜索入口定义为模块顶层全局:即使 initSearch 未执行,按钮/回车也能触发
 window.searchGo = function () {
   const kw = el('searchInput').value.trim()
   const st = el('searchStatus')
@@ -39,6 +30,16 @@ window.searchGo = function () {
       btn.disabled = false
       setStatus(st, '搜索失败:' + (e.message || e), 'err')
     })
+}
+
+export function initSearch() {
+  el('searchBtn').addEventListener('click', () => {
+    el('playerView').classList.add('hidden')
+    el('searchView').classList.remove('hidden')
+    el('searchInput').focus()
+  })
+  el('backToPlayerBtn').addEventListener('click', showPlayerView)
+  // searchGoBtn 用 onclick 属性直连 window.searchGo(双保险),此处不重复绑定
 }
 
 function renderResults(results) {

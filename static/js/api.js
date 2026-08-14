@@ -29,7 +29,7 @@ export function hasClientPlayer() {
   return !!(window.SongloftPlugin && window.SongloftPlugin.player)
 }
 
-/** 拉取歌词文本(经宿主认证端点;自动检测 UTF-8/GBK 编码) */
+/** 拉取歌词文本(经宿主认证端点;自动检测 UTF-8/GBK 编码;兼容宿主 JSON 包装) */
 export function fetchLyric(lyricUrl) {
   if (!lyricUrl) return Promise.resolve('')
   const url = /^https?:/i.test(lyricUrl) ? lyricUrl : new URL(lyricUrl, window.location.origin).href
@@ -39,7 +39,24 @@ export function fetchLyric(lyricUrl) {
   return fetch(url, { headers })
     .then((r) => (r.ok ? r.arrayBuffer() : null))
     .then((buf) => (buf ? decodeText(buf) : ''))
+    .then(unwrapLyric)
     .catch(() => '')
+}
+
+/** 宿主歌词端点返回 LyricPayload JSON({"lyric","tlyric","rlyric","lxlyric"}),
+ *  解包取主歌词;纯 LRC 文本原样返回。 */
+function unwrapLyric(text) {
+  const t = (text || '').trim()
+  if (!t || t[0] !== '{') return t
+  try {
+    const obj = JSON.parse(t)
+    if (obj && typeof obj.lyric === 'string') {
+      const parts = [obj.lyric]
+      if (typeof obj.tlyric === 'string' && obj.tlyric.trim()) parts.push(obj.tlyric)
+      return parts.join('\n')
+    }
+  } catch (e) { /* 非 JSON 原样返回 */ }
+  return t
 }
 
 /** 编码检测:先按 UTF-8 解码,出现替换字符则回退 GBK(中文音乐平台歌词常见 GBK) */

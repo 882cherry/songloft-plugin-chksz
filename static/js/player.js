@@ -90,16 +90,24 @@ function init() {
   })
 
   // 状态订阅(节流,current_time 可能不实时,用本地 tick 平滑推进)
-  unsub = player.onStateChange((s) => {
-    Object.assign(state, s)
-    render()
-  })
+  if (player && typeof player.onStateChange === 'function') {
+    unsub = player.onStateChange((s) => {
+      try {
+        Object.assign(state, s)
+        render()
+      } catch (e) {
+        console.error('[chksz] state render failed:', e)
+      }
+    })
+  }
 
-  player.getState().then((s) => {
-    if (!s) return
-    Object.assign(state, s)
-    render()
-  })
+  if (player && typeof player.getState === 'function') {
+    player.getState().then((s) => {
+      if (!s) return
+      Object.assign(state, s)
+      render()
+    }).catch(() => {})
+  }
 
   tickTimer = setInterval(() => {
     if (!dragging && state.is_playing && state.duration > 0 && player) {
@@ -120,6 +128,14 @@ function init() {
 }
 
 function render() {
+  try {
+    _render()
+  } catch (e) {
+    console.error('[chksz] render failed:', e)
+  }
+}
+
+function _render() {
   const song = state.current_song
   const cover = el('cover')
   const coverPh = el('coverPh')
