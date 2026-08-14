@@ -211,6 +211,33 @@ router.post('/api/settings', async (req) => {
   return jsonResponse({ ok: true });
 });
 
+// 导入搜索结果到曲库(remote 歌曲,自动关联本插件,播放时宿主经 /api/music/url 解析)。
+// 供插件前端「搜索→播放」使用;也可被其他插件/脚本调用。
+router.post('/api/import', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const item = body.song || body;
+  if (!item || !item.title || !item.source_data) {
+    return jsonResponse({ error: 'invalid song: title and source_data required' }, 400);
+  }
+  try {
+    const created = await songloft.songs.create([{
+      title: item.title,
+      artist: item.artist || '',
+      album: item.album || '',
+      coverUrl: item.cover_url || undefined,
+      duration: item.duration || 0,
+      sourceData: JSON.stringify(item.source_data),
+      dedupKey: `chksz_${item.source_data.platform}_${item.source_data.id || item.source_data.mid}`,
+    }]);
+    const s = created && created[0];
+    if (!s || !s.id) throw new Error('创建歌曲失败,宿主未返回 id');
+    return jsonResponse({ ok: true, id: s.id, title: s.title });
+  } catch (e: any) {
+    songloft.log.error(`[chksz] 导入歌曲失败: ${e?.message || e}`);
+    return jsonResponse({ error: String(e?.message || e) }, 500);
+  }
+});
+
 // 健康检查(宿主健康检查兜底)
 router.get('/api/health', async () => jsonResponse({ ok: true }));
 
