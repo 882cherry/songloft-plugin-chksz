@@ -13,8 +13,9 @@
     "storage",
     "inter-plugin"
   ],
+  "icon": "icon.1cb24a8e.svg",
   "updateUrl": "https://raw.githubusercontent.com/882cherry/songloft-plugin-chksz/main/plugin.json",
   "download_url": "https://github.com/882cherry/songloft-plugin-chksz/releases/download/v2026.8.14/chksz.jsplugin.zip",
   "entryHash": "0ba6ae1d5072e49052ab8bea00fb5af295697d1a71b177890d362ee487bbe227",
-  "zipHash": "d3c356d173f067c18a353454b3af601514f560ddb1c0572c3a9157bf73dc772b"
+  "zipHash": "a3e01946a1b83a675192885d8fd80e22c64e4514e4b08ba1af0d106b011d75a2"
 }
