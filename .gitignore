@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+# 冒烟测试脚本内含本地调试用的 API Key,不进仓库
+smoke-test.mjs
