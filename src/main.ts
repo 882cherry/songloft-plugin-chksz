@@ -28,7 +28,7 @@ import type {
 } from '@songloft/plugin-sdk';
 
 const API_BASE = 'https://api.chksz.com/api';
-const REQ_TIMEOUT_MS = 8000;
+const REQ_TIMEOUT_MS = 6000;
 
 // ===== 音质映射(实测:服务端严格校验,非法值直接 400,无别名/降级)=====
 // 网易云 level: standard / exhigh / lossless / hires / jymaster / sky / jyeffect
@@ -77,9 +77,10 @@ async function chkszGet(path: string, params: Record<string, string>): Promise<a
   return body;
 }
 
-// ===== 搜索:三平台并发,单平台失败不影响整体 =====
+// ===== 搜索:三平台并发,单平台失败不影响整体;全失败时报聚合错误 =====
 async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
   const items: SearchResultItem[] = [];
+  const errors: string[] = [];
   const tasks: Promise<void>[] = [];
 
   // 网易云: data.songs[] = {id, name, artists, album, picUrl, duration(毫秒)}
@@ -97,6 +98,7 @@ async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
         });
       }
     } catch (e: any) {
+      errors.push(`网易云: ${e?.message || e}`);
       songloft.log.warn(`[chksz] 网易云搜索失败: ${e?.message || e}`);
     }
   })());
@@ -115,6 +117,7 @@ async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
         });
       }
     } catch (e: any) {
+      errors.push(`QQ: ${e?.message || e}`);
       songloft.log.warn(`[chksz] QQ搜索失败: ${e?.message || e}`);
     }
   })());
@@ -133,11 +136,16 @@ async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
         });
       }
     } catch (e: any) {
+      errors.push(`酷狗: ${e?.message || e}`);
       songloft.log.warn(`[chksz] 酷狗搜索失败: ${e?.message || e}`);
     }
   })());
 
   await Promise.all(tasks);
+  if (!items.length && errors.length) {
+    // 全平台失败:透传首个错误,避免前端误判为「无结果」
+    throw new Error(`ChKSz 搜索失败(${errors.length}/3): ${errors[0]}`);
+  }
   return items;
 }
 

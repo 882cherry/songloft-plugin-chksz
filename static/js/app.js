@@ -19,9 +19,8 @@ function init() {
   // 配置弹窗(左上角图标)
   initConfig(checkKeyStatus)
 
-  // 底部面板:队列 / 歌词 / 音量
+  // 底部面板:队列 / 音量
   bindSheet('queueBackdrop', 'queueSheet', el('queueBtn'), [])
-  bindSheet('lyricBackdrop', 'lyricSheet', el('lyricBtn'), [])
   bindSheet('volumeBackdrop', 'volumeSheet', el('volumeBtn'), [])
 
   // 歌词同步(读播放器当前进度)

@@ -29,7 +29,7 @@ export function hasClientPlayer() {
   return !!(window.SongloftPlugin && window.SongloftPlugin.player)
 }
 
-/** 拉取歌词文本(经宿主认证端点) */
+/** 拉取歌词文本(经宿主认证端点;自动检测 UTF-8/GBK 编码) */
 export function fetchLyric(lyricUrl) {
   if (!lyricUrl) return Promise.resolve('')
   const url = /^https?:/i.test(lyricUrl) ? lyricUrl : new URL(lyricUrl, window.location.origin).href
@@ -37,6 +37,20 @@ export function fetchLyric(lyricUrl) {
   const token = getToken()
   if (token) headers['Authorization'] = 'Bearer ' + token
   return fetch(url, { headers })
-    .then((r) => (r.ok ? r.text() : ''))
+    .then((r) => (r.ok ? r.arrayBuffer() : null))
+    .then((buf) => (buf ? decodeText(buf) : ''))
     .catch(() => '')
+}
+
+/** 编码检测:先按 UTF-8 解码,出现替换字符则回退 GBK(中文音乐平台歌词常见 GBK) */
+function decodeText(buf) {
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buf)
+  // 检测是否存在 U+FFFD(替换字符)或异常成对出现的控制字符
+  const suspicious = utf8.indexOf('\uFFFD') >= 0
+  if (!suspicious) return utf8
+  try {
+    return new TextDecoder('gbk').decode(buf)
+  } catch (e) {
+    return utf8
+  }
 }

@@ -104,16 +104,35 @@
         }
         .bg-overlay { position: absolute; inset: 0; z-index: 1; background: linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.02) 30%, rgba(0,0,0,.25)); }
         #playerView .app-bar { position: relative; color: var(--md-on-surface); }
-        .player-main {
-            position: relative; z-index: 2; flex: 1;
+
+        /* 双页滑动容器(播放 ⇄ 歌词) */
+        .player-swiper {
+            position: relative; z-index: 2; flex: 1; min-height: 0;
+            display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+            scroll-behavior: smooth; -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .player-swiper::-webkit-scrollbar { display: none; }
+        .swiper-page {
+            flex: 0 0 100%; width: 100%; scroll-snap-align: start;
+            overflow-y: auto; min-height: 0; -webkit-overflow-scrolling: touch;
+        }
+        .page-indicator {
+            position: relative; z-index: 3; display: flex; justify-content: center; gap: 6px;
+            padding: 6px 0 2px; flex: 0 0 auto;
+        }
+        .page-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--md-outline); transition: all .2s ease; }
+        .page-dot.active { width: 18px; border-radius: 3px; background: var(--md-primary); }
+
+        .player-page {
             display: flex; flex-direction: column; align-items: center;
-            padding: 12px 24px 20px; min-height: 0; overflow-y: auto;
+            padding: 6px 24px 18px; min-height: 100%;
         }
         .cover-wrap {
-            width: min(62vw, 300px); aspect-ratio: 1; flex: 0 0 auto;
+            width: min(58vw, 280px); aspect-ratio: 1; flex: 0 0 auto;
             border-radius: 18px; overflow: hidden; position: relative;
             box-shadow: 0 18px 40px rgba(0,0,0,.28);
-            background: var(--md-surface-variant); margin: 8px 0 18px;
+            background: var(--md-surface-variant); margin: 6px 0 14px;
         }
         .cover-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .cover-ph {
@@ -121,7 +140,7 @@
             color: var(--md-on-surface-variant);
         }
         .cover-ph .material-symbols-outlined { font-size: 72px; }
-        .song-info { text-align: center; width: 100%; margin-bottom: 10px; }
+        .song-info { text-align: center; width: 100%; margin-bottom: 8px; }
         .song-title { font-size: 19px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .song-artist { font-size: 13px; color: var(--md-on-surface-variant); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .song-tags { display: flex; justify-content: center; gap: 6px; margin-top: 6px; min-height: 18px; }
@@ -157,6 +176,19 @@
         }
         .play-btn .material-symbols-outlined { font-size: 34px !important; }
         .player-extra { display: flex; gap: 6px; margin-top: 6px; }
+
+        /* 歌词页 */
+        .lyric-page { position: relative; display: flex; flex-direction: column; align-items: center; }
+        .lyric-wrap {
+            width: 100%; max-width: 480px; padding: 34px 20px 60px;
+            text-align: center; font-size: 15px;
+        }
+        .lyric-line {
+            color: var(--md-on-surface-variant); padding: 8px 6px;
+            transition: color .2s ease, transform .2s ease; line-height: 1.55;
+        }
+        .lyric-line.active { color: var(--md-primary); font-weight: 700; font-size: 17px; transform: scale(1.02); }
+        .lyric-empty { text-align: center; color: var(--md-on-surface-variant); padding: 60px 0; font-size: 13px; }
 
         /* ===== 搜索视图 ===== */
         #searchView { background: var(--md-surface-1); }
@@ -275,38 +307,48 @@
             <div class="bar-title">ChKSz 播放器</div>
             <button class="btn-icon" id="searchBtn" title="搜索歌曲"><span class="material-symbols-outlined">search</span></button>
         </header>
-        <div class="player-main">
-            <div class="cover-wrap">
-                <img id="cover" alt="" referrerpolicy="no-referrer" style="display:none">
-                <div class="cover-ph" id="coverPh"><span class="material-symbols-outlined">music_note</span></div>
-            </div>
-            <div class="song-info">
-                <div class="song-title" id="songTitle">未在播放</div>
-                <div class="song-artist" id="songArtist">搜索歌曲开始播放</div>
-                <div class="song-tags">
-                    <span class="song-status" id="platformTag" style="display:none"></span>
-                    <span class="song-status" id="radioTag" style="display:none">电台</span>
+        <div class="page-indicator">
+            <span class="page-dot active" id="dotPlayer"></span>
+            <span class="page-dot" id="dotLyric"></span>
+        </div>
+        <div class="player-swiper" id="playerSwiper">
+            <!-- 页 1:播放 -->
+            <div class="swiper-page player-page" id="playerPage">
+                <div class="cover-wrap">
+                    <img id="cover" alt="" referrerpolicy="no-referrer" style="display:none">
+                    <div class="cover-ph" id="coverPh"><span class="material-symbols-outlined">music_note</span></div>
+                </div>
+                <div class="song-info">
+                    <div class="song-title" id="songTitle">未在播放</div>
+                    <div class="song-artist" id="songArtist">搜索歌曲开始播放</div>
+                    <div class="song-tags">
+                        <span class="song-status" id="platformTag" style="display:none"></span>
+                        <span class="song-status" id="radioTag" style="display:none">电台</span>
+                    </div>
+                </div>
+                <div class="progress">
+                    <span class="progress-time" id="curTime">0:00</span>
+                    <div class="progress-track" id="progressTrack">
+                        <div class="progress-rail"></div>
+                        <div class="progress-fill" id="progressFill"></div>
+                        <div class="progress-thumb" id="progressThumb"></div>
+                    </div>
+                    <span class="progress-time" id="totalTime">0:00</span>
+                </div>
+                <div class="controls">
+                    <button class="btn-icon" id="modeBtn" title="播放模式"><span class="material-symbols-outlined">repeat</span></button>
+                    <button class="btn-icon" id="prevBtn" title="上一首"><span class="material-symbols-outlined">skip_previous</span></button>
+                    <button class="btn-icon play-btn" id="playBtn" title="播放/暂停"><span class="material-symbols-outlined">play_arrow</span></button>
+                    <button class="btn-icon" id="nextBtn" title="下一首"><span class="material-symbols-outlined">skip_next</span></button>
+                    <button class="btn-icon" id="volumeBtn" title="音量"><span class="material-symbols-outlined">volume_up</span></button>
+                </div>
+                <div class="player-extra">
+                    <button class="btn-text" id="queueBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">queue_music</span> 播放队列</button>
                 </div>
             </div>
-            <div class="progress">
-                <span class="progress-time" id="curTime">0:00</span>
-                <div class="progress-track" id="progressTrack">
-                    <div class="progress-rail"></div>
-                    <div class="progress-fill" id="progressFill"></div>
-                    <div class="progress-thumb" id="progressThumb"></div>
-                </div>
-                <span class="progress-time" id="totalTime">0:00</span>
-            </div>
-            <div class="controls">
-                <button class="btn-icon" id="modeBtn" title="播放模式"><span class="material-symbols-outlined">repeat</span></button>
-                <button class="btn-icon" id="prevBtn" title="上一首"><span class="material-symbols-outlined">skip_previous</span></button>
-                <button class="btn-icon play-btn" id="playBtn" title="播放/暂停"><span class="material-symbols-outlined">play_arrow</span></button>
-                <button class="btn-icon" id="nextBtn" title="下一首"><span class="material-symbols-outlined">skip_next</span></button>
-                <button class="btn-icon" id="volumeBtn" title="音量"><span class="material-symbols-outlined">volume_up</span></button>
-            </div>
-            <div class="player-extra">
-                <button class="btn-text" id="queueBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">queue_music</span> 播放队列</button>
-                <button class="btn-text" id="lyricBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">lyrics</span> 歌词</button>
+            <!-- 页 2:歌词(左右滑动切换) -->
+            <div class="swiper-page lyric-page" id="lyricPage">
+                <div class="lyric-wrap" id="lyricList"><div class="lyric-empty">暂无歌词</div></div>
             </div>
         </div>
     </div>
@@ -354,14 +396,6 @@
         <div class="sheet-handle"></div>
         <div class="sheet-title">播放队列</div>
         <div class="sheet-body" id="queueList"></div>
-    </div>
-
-    <!-- ===== 歌词面板 ===== -->
-    <div class="menu-backdrop" id="lyricBackdrop" style="display:none"></div>
-    <div class="bottom-sheet" id="lyricSheet">
-        <div class="sheet-handle"></div>
-        <div class="sheet-title">歌词</div>
-        <div class="sheet-body" id="lyricList"><div class="lyric-empty">暂无歌词</div></div>
     </div>
 
     <!-- ===== 音量面板 ===== -->

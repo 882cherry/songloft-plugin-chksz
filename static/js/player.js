@@ -105,9 +105,18 @@ function init() {
     if (!dragging && state.is_playing && state.duration > 0 && player) {
       state.current_time = Math.min(state.current_time + 0.5, state.duration)
       renderProgress()
-      updateLyricScroll()
     }
   }, 500)
+
+  // 双页滑动指示点(播放 ⇄ 歌词)
+  const swiper = el('playerSwiper')
+  const syncDots = () => {
+    const pageW = swiper.clientWidth || 1
+    const isLyric = swiper.scrollLeft > pageW * 0.4
+    el('dotPlayer').classList.toggle('active', !isLyric)
+    el('dotLyric').classList.toggle('active', isLyric)
+  }
+  swiper.addEventListener('scroll', syncDots, { passive: true })
 }
 
 function render() {
@@ -216,17 +225,13 @@ export function showPlayerView() {
   el('playerView').classList.remove('hidden')
 }
 
-function updateLyricScroll() {
-  // 歌词滚动由 lyrics.js 提供
-}
-
 export function getState() { return state }
 export function isReady() { return !!player }
 
 export function initPlayer() {
   if (!hasClientPlayer()) {
     // 宿主不可用(浏览器单独打开):控制区禁用并提示
-    ;['playBtn', 'prevBtn', 'nextBtn', 'modeBtn', 'volumeBtn', 'queueBtn', 'lyricBtn'].forEach((id) => {
+    ;['playBtn', 'prevBtn', 'nextBtn', 'modeBtn', 'volumeBtn', 'queueBtn'].forEach((id) => {
       const b = document.getElementById(id)
       if (b) b.style.opacity = '.35'
     })

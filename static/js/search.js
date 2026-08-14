@@ -53,31 +53,52 @@ function renderResults(results) {
     const platform = item.source_data ? item.source_data.platform : ''
     const row = document.createElement('div')
     row.className = 'song-row'
-    const cover = item.cover_url
-      ? '<img class="song-cover" src="' + item.cover_url + '" referrerpolicy="no-referrer" onerror="this.outerHTML=this.outerHTML">'
-      : '<span class="song-cover-ph"><span class="material-symbols-outlined">music_note</span></span>'
-    row.innerHTML =
-      cover +
-      '<div class="song-meta">' +
-      '  <div class="song-title2"></div>' +
-      '  <div class="song-sub2"></div>' +
-      '</div>' +
-      '<div class="song-actions" style="display:flex;gap:2px">' +
-      (canPlay
-        ? '<button class="btn-icon" title="播放"><span class="material-symbols-outlined">play_arrow</span></button>' +
-          '<button class="btn-icon" title="加入队列"><span class="material-symbols-outlined">playlist_add</span></button>'
-        : '') +
-      '<button class="btn-icon" title="导入曲库"><span class="material-symbols-outlined">library_add</span></button>' +
-      '</div>'
-    row.querySelector('.song-title2').textContent = item.title
-    row.querySelector('.song-sub2').textContent = platformName(platform) + ' · ' + [item.artist, item.album].filter(Boolean).join(' · ')
-    const btns = row.querySelectorAll('.song-actions .btn-icon')
-    let i = 0
-    if (canPlay) {
-      btns[i++].addEventListener('click', () => handle(item, 'play'))
-      btns[i++].addEventListener('click', () => handle(item, 'queue'))
+
+    // 封面(JS 构建,加载失败自动换占位,避免内联 onerror 隐患)
+    if (item.cover_url) {
+      const img = document.createElement('img')
+      img.className = 'song-cover'
+      img.referrerPolicy = 'no-referrer'
+      img.alt = ''
+      img.src = item.cover_url
+      img.addEventListener('error', () => {
+        const ph = document.createElement('span')
+        ph.className = 'song-cover-ph'
+        ph.innerHTML = '<span class="material-symbols-outlined">music_note</span>'
+        img.replaceWith(ph)
+      })
+      row.appendChild(img)
+    } else {
+      const ph = document.createElement('span')
+      ph.className = 'song-cover-ph'
+      ph.innerHTML = '<span class="material-symbols-outlined">music_note</span>'
+      row.appendChild(ph)
     }
-    btns[i].addEventListener('click', () => handle(item, 'import'))
+
+    const meta = document.createElement('div')
+    meta.className = 'song-meta'
+    meta.innerHTML = '<div class="song-title2"></div><div class="song-sub2"></div>'
+    meta.querySelector('.song-title2').textContent = item.title
+    meta.querySelector('.song-sub2').textContent = platformName(platform) + ' · ' + [item.artist, item.album].filter(Boolean).join(' · ')
+    row.appendChild(meta)
+
+    const actions = document.createElement('div')
+    actions.className = 'song-actions'
+    actions.style.cssText = 'display:flex;gap:2px'
+    const mkBtn = (icon, title) => {
+      const b = document.createElement('button')
+      b.className = 'btn-icon'
+      b.title = title
+      b.innerHTML = '<span class="material-symbols-outlined">' + icon + '</span>'
+      actions.appendChild(b)
+      return b
+    }
+    if (canPlay) {
+      mkBtn('play_arrow', '播放').addEventListener('click', () => handle(item, 'play'))
+      mkBtn('playlist_add', '加入队列').addEventListener('click', () => handle(item, 'queue'))
+    }
+    mkBtn('library_add', '导入曲库').addEventListener('click', () => handle(item, 'import'))
+    row.appendChild(actions)
     box.appendChild(row)
   })
 }

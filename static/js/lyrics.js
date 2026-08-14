@@ -1,9 +1,9 @@
 // lyrics.js — 歌词解析与滚动同步
 
-import { parseLrc, setStatus } from './util.js'
+import { parseLrc } from './util.js'
 import { fetchLyric } from './api.js'
 
-const state = { id: null, lines: [], url: '', el: null, activeIdx: -1, timer: null }
+const state = { id: null, lines: [], url: '', activeIdx: -1 }
 
 function el(id) { return document.getElementById(id) }
 
@@ -27,9 +27,15 @@ export function setLyricFor(songId, lyricUrl) {
     state.lines = lines
     const wrap = el('lyricList')
     wrap.innerHTML = ''
-    lines.forEach(() => {
+    lines.forEach((line, i) => {
       const div = document.createElement('div')
       div.className = 'lyric-line'
+      div.textContent = line.text
+      // 点击歌词行跳转到对应时间
+      div.addEventListener('click', () => {
+        const p = window.SongloftPlugin && window.SongloftPlugin.player
+        if (p) p.seek(line.time).catch(() => {})
+      })
       wrap.appendChild(div)
     })
     syncScroll(true)
@@ -38,8 +44,6 @@ export function setLyricFor(songId, lyricUrl) {
 
 export function initLyrics(getter) {
   currentTimeGetter = getter
-  const wrap = el('lyricList')
-  wrap.addEventListener('scroll', () => { state.scrollingByUser = true }, { passive: true })
   setInterval(() => syncScroll(false), 1000)
 }
 
@@ -58,8 +62,11 @@ function syncScroll(force) {
     node.textContent = lines[i].text
     node.classList.toggle('active', i === idx)
   })
+  // 手动滚动歌词页容器(避免 scrollIntoView 误动横向 swiper)
+  const page = el('lyricPage')
   const active = wrap.children[idx]
-  if (active && active.scrollIntoView) {
-    try { active.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch { /* ignore */ }
+  if (page && active) {
+    const top = active.offsetTop - page.clientHeight / 2 + active.clientHeight / 2
+    page.scrollTo({ top: Math.max(0, top), behavior: force ? 'auto' : 'smooth' })
   }
 }
