@@ -1,10 +1,74 @@
-// search.js — 搜索视图
+// search.js — 搜索视图(平台多选)
 
 import { api, hasClientPlayer } from './api.js'
 import { setStatus, snackbar, platformName } from './util.js'
-import { playSongs, addToQueue, showPlayerView } from './player.js'
+import { playSongs, addToQueue, openPlayerScreen } from './player.js'
+import { openPlaylistPicker } from './playlists.js'
 
 function el(id) { return document.getElementById(id) }
+
+// 平台选项(与后端 src/main.ts 的 ALL_PLATFORMS 对应)
+const PLATFORM_OPTIONS = [
+  { code: 'wy', name: '网易云' },
+  { code: 'tx', name: 'QQ' },
+  { code: 'kg', name: '酷狗' },
+]
+const ALL_CODES = PLATFORM_OPTIONS.map((p) => p.code)
+let selectedPlatforms = [...ALL_CODES]
+
+// 渲染平台 chips(多选)
+function renderPlatforms() {
+  const bar = el('platformBar')
+  if (!bar) return
+  bar.innerHTML = ''
+  PLATFORM_OPTIONS.forEach((p) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'chip' + (selectedPlatforms.includes(p.code) ? ' on' : '')
+    b.title = '搜索' + p.name
+    b.innerHTML = '<span class="material-symbols-outlined">check</span>' + p.name
+    b.addEventListener('click', () => {
+      const on = selectedPlatforms.includes(p.code)
+      if (on && selectedPlatforms.length === 1) {
+        snackbar('至少保留一个搜索平台')
+        return
+      }
+      selectedPlatforms = on
+        ? selectedPlatforms.filter((c) => c !== p.code)
+        : [...selectedPlatforms, p.code]
+      renderPlatforms()
+      persistPlatforms()
+    })
+    bar.appendChild(b)
+  })
+}
+
+// 平台选择持久化到插件设置(后端 /api/settings)
+function persistPlatforms() {
+  api('api/settings', { method: 'POST', body: JSON.stringify({ platforms: selectedPlatforms }) })
+    .catch(() => {})
+}
+
+// 加载已保存的平台选择
+function loadPlatforms() {
+  api('api/settings')
+    .then((data) => {
+      if (data && Array.isArray(data.platforms) && data.platforms.length) {
+        const clean = data.platforms.filter((c) => ALL_CODES.includes(c))
+        if (clean.length) {
+          selectedPlatforms = clean
+          renderPlatforms()
+        }
+      }
+    })
+    .catch(() => {})
+}
+
+function platformNames() {
+  return selectedPlatforms
+    .map((c) => (PLATFORM_OPTIONS.find((p) => p.code === c) || {}).name || c)
+    .join(' / ')
+}
 
 // 搜索入口定义为模块顶层全局:即使 initSearch 未执行,按钮/回车也能触发
 window.searchGo = function () {
@@ -16,9 +80,13 @@ window.searchGo = function () {
     el('searchInput').focus()
     return
   }
+  if (!selectedPlatforms.length) {
+    setStatus(st, '请至少选择一个搜索平台', 'err')
+    return
+  }
   btn.disabled = true
-  setStatus(st, '搜索中…')
-  api('api/search', { method: 'POST', body: JSON.stringify({ keyword: kw }) })
+  setStatus(st, '搜索中(' + platformNames() + ')…')
+  api('api/search/select', { method: 'POST', body: JSON.stringify({ keyword: kw, platforms: selectedPlatforms }) })
     .then((data) => {
       btn.disabled = false
       const results = (data && data.results) || []
@@ -37,12 +105,9 @@ window.searchGo = function () {
 }
 
 export function initSearch() {
-  el('searchBtn').addEventListener('click', () => {
-    el('playerView').classList.add('hidden')
-    el('searchView').classList.remove('hidden')
-    el('searchInput').focus()
-  })
-  el('backToPlayerBtn').addEventListener('click', showPlayerView)
+  // 平台 chips:渲染 + 加载已保存选择
+  renderPlatforms()
+  loadPlatforms()
   // searchGoBtn 用 onclick 属性直连 window.searchGo(双保险),此处不重复绑定
 }
 
@@ -53,7 +118,6 @@ function renderResults(results) {
     box.innerHTML = '<div class="empty-state">未找到结果</div>'
     return
   }
-  const canPlay = hasClientPlayer()
   results.forEach((item) => {
     const platform = item.source_data ? item.source_data.platform : ''
     const row = document.createElement('div')
@@ -98,16 +162,16 @@ function renderResults(results) {
       actions.appendChild(b)
       return b
     }
-    if (canPlay) {
-      mkBtn('play_arrow', '播放').addEventListener('click', () => handle(item, 'play'))
-      mkBtn('playlist_add', '加入队列').addEventListener('click', () => handle(item, 'queue'))
-    }
+    mkBtn('play_arrow', '播放').addEventListener('click', () => handle(item, 'play'))
+    mkBtn('playlist_add', '加入队列').addEventListener('click', () => handle(item, 'queue'))
+    mkBtn('favorite_border', '收藏到歌单').addEventListener('click', () => handle(item, 'fav'))
     mkBtn('library_add', '导入曲库').addEventListener('click', () => handle(item, 'import'))
     row.appendChild(actions)
     box.appendChild(row)
   })
 }
 
+/** 先导入曲库拿到 song id,再按动作处理 */
 function handle(item, action) {
   const st = el('searchStatus')
   setStatus(st, '处理中…')
@@ -117,16 +181,27 @@ function handle(item, action) {
         setStatus(st, '导入失败:' + JSON.stringify(data), 'err')
         return
       }
-      if (action === 'play' && hasClientPlayer()) {
-        await playSongs([{ id: data.id, title: data.title }])
-        showPlayerView()
-        setStatus(st, '已播放:' + data.title, 'ok')
-      } else if (action === 'queue' && hasClientPlayer()) {
-        await addToQueue([{ id: data.id, title: data.title }])
-        setStatus(st, '已加入播放队列:' + data.title, 'ok')
-        snackbar('已加入队列')
+      const song = { id: data.id, title: data.title || item.title, artist: item.artist, album: item.album, cover_url: item.cover_url }
+      if (action === 'play') {
+        try {
+          await playSongs([song])
+          setStatus(st, '正在播放:' + song.title, 'ok')
+        } catch (e) {
+          setStatus(st, '已导入曲库,宿主播放器不可用:' + (e.message || e), 'err')
+        }
+      } else if (action === 'queue') {
+        try {
+          await addToQueue([song])
+          setStatus(st, '已加入播放队列:' + song.title, 'ok')
+          snackbar('已加入队列')
+        } catch (e) {
+          setStatus(st, '已导入曲库,宿主播放器不可用:' + (e.message || e), 'err')
+        }
+      } else if (action === 'fav') {
+        openPlaylistPicker(song)
+        setStatus(st, '选择要收藏到的歌单', 'ok')
       } else {
-        setStatus(st, '已导入曲库:' + data.title, 'ok')
+        setStatus(st, '已导入曲库:' + song.title, 'ok')
         snackbar('已导入曲库')
       }
     })

@@ -9,7 +9,12 @@ let onSaved = null
 
 export function initConfig(onConfigSaved) {
   onSaved = onConfigSaved || null
-  el('configBtn').addEventListener('click', openConfig)
+  // 旧版播放器栏的设置按钮(可能不存在,需防御)
+  const cfg1 = el('configBtn')
+  if (cfg1) cfg1.addEventListener('click', openConfig)
+  // 搜索栏的设置按钮
+  const cfg2 = el('configBtn2')
+  if (cfg2) cfg2.addEventListener('click', openConfig)
   el('configCancelBtn').addEventListener('click', closeConfig)
   el('configBackdrop').addEventListener('click', closeConfig)
   el('saveConfigBtn').addEventListener('click', saveConfig)
@@ -18,6 +23,8 @@ export function initConfig(onConfigSaved) {
 export function openConfig() {
   el('configBackdrop').style.display = 'block'
   requestAnimationFrame(() => el('configSheet').classList.add('show'))
+  // 兜底:后台/隐藏 iframe 中 rAF 可能不触发,用定时器再补一次(幂等)
+  setTimeout(() => el('configSheet').classList.add('show'), 60)
   el('configStatus').textContent = ''
   api('api/settings').then((data) => {
     if (!data) return

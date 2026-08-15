@@ -1,5 +1,8 @@
 // util.js — 通用工具
 
+// 平台名称(与 src/main.ts 的 ALL_PLATFORMS 对应;此前缺失导致 bundle 中引用未定义标识符)
+const PLATFORM_NAME = { wy: '网易云', tx: 'QQ', kg: '酷狗' }
+
 export function fmtTime(sec) {
   if (!isFinite(sec) || sec < 0) sec = 0
   const m = Math.floor(sec / 60)

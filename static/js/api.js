@@ -1,6 +1,5 @@
 // api.js — 插件 API 请求(自动带宿主 token)
 
-const PLATFORM_NAME = { wy: '网易云', tx: 'QQ', kg: '酷狗' }
 export const API_BASE = window.location.pathname.replace(/\/+$/, '') + '/'
 
 export function getToken() {

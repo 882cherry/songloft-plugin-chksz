@@ -1,8 +1,12 @@
-// player.js — 播放器:状态同步 / 控制 / 进度 / 队列 / 音量 / 播放模式
+// player.js — 播放控制(网易云风格):
+//   搜索页 + 底部迷你播放条 + 全屏播放界面(覆盖层,可折叠收起)
+//   播放界面/歌词界面点击切换;支持收藏到歌单
+// 播放器宿主: SongloftPlugin.player(Web UI / 客户端异步注入,需轮询等待)
 
-import { fmtTime, snackbar, platformName } from './util.js'
-import { hasClientPlayer, fetchLyric } from './api.js'
+import { fmtTime, snackbar, platformName, bindSheet } from './util.js'
+import { hasClientPlayer } from './api.js'
 import { setLyricFor } from './lyrics.js'
+import { openPlaylistPicker } from './playlists.js'
 
 const MODES = ['order', 'loop', 'single', 'random', 'singlePlay']
 const MODE_ICON = {
@@ -36,97 +40,120 @@ let tickTimer = null
 let dragging = false
 let dragPreviewSec = -1
 let unsub = null
+let lastSongKey = ''
+
+const LS_KEY = 'chksz_player_state_v1'
 
 function el(id) { return document.getElementById(id) }
 
-function init() {
-  if (!hasClientPlayer()) return
-  player = window.SongloftPlugin.player
-
-  el('playBtn').addEventListener('click', () => player.togglePlay())
-  el('prevBtn').addEventListener('click', () => player.prev())
-  el('nextBtn').addEventListener('click', () => player.next())
-  el('modeBtn').addEventListener('click', () => {
-    const idx = MODES.indexOf(state.play_mode)
-    const next = MODES[(idx + 1) % MODES.length]
-    player.setPlayMode(next).then(() => snackbar('播放模式: ' + MODE_NAME[next]))
-  })
-
-  // 进度条拖动
-  const track = el('progressTrack')
-  const posFromEvent = (e) => {
-    const rect = track.getBoundingClientRect()
-    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-    return ratio * (state.duration || 0)
+// ===== 宿主播放器获取(Web UI 的 SongloftPlugin 在页面加载后才注入,需轮询) =====
+function getPlayer() {
+  if (player) return player
+  if (window.SongloftPlugin && window.SongloftPlugin.player) {
+    player = window.SongloftPlugin.player
+    bindPlayerEvents()
   }
-  track.addEventListener('pointerdown', (e) => {
-    dragging = true
-    track.classList.add('dragging')
-    track.setPointerCapture(e.pointerId)
-    dragPreviewSec = posFromEvent(e)
-    renderProgress()
-  })
-  track.addEventListener('pointermove', (e) => {
-    if (!dragging) return
-    dragPreviewSec = posFromEvent(e)
-    renderProgress()
-  })
-  const endDrag = () => {
-    if (!dragging) return
-    dragging = false
-    track.classList.remove('dragging')
-    if (dragPreviewSec >= 0 && player) player.seek(dragPreviewSec)
-    dragPreviewSec = -1
-  }
-  track.addEventListener('pointerup', endDrag)
-  track.addEventListener('pointercancel', endDrag)
+  return player
+}
 
-  // 音量
-  const slider = el('volumeSlider')
-  slider.addEventListener('input', () => {
-    const v = parseInt(slider.value, 10)
-    state.volume = v
-    player.setVolume(v)
-  })
+function hasPlayer() { return !!getPlayer() }
 
-  // 状态订阅(节流,current_time 可能不实时,用本地 tick 平滑推进)
+// ===== 状态订阅 =====
+let autoOpened = false // 仅首次自动展开播放界面
+
+function bindPlayerEvents() {
+  if (unsub) return
   if (player && typeof player.onStateChange === 'function') {
     unsub = player.onStateChange((s) => {
       try {
         Object.assign(state, s)
         render()
+        persist()
       } catch (e) {
         console.error('[chksz] state render failed:', e)
       }
     })
   }
-
   if (player && typeof player.getState === 'function') {
     player.getState().then((s) => {
       if (!s) return
       Object.assign(state, s)
       render()
+      persist()
+      // 需求:进入页面时若已有播放列表(当前歌曲),直接显示播放界面(仅首次)
+      if (state.current_song && !autoOpened) {
+        autoOpened = true
+        openPlayerScreen()
+      }
     }).catch(() => {})
   }
-
-  tickTimer = setInterval(() => {
-    if (!dragging && state.is_playing && state.duration > 0 && player) {
-      state.current_time = Math.min(state.current_time + 0.5, state.duration)
-      renderProgress()
-    }
-  }, 500)
-
-  // 双页滑动指示点(播放 ⇄ 歌词)
-  const swiper = el('playerSwiper')
-  const syncDots = () => {
-    const pageW = swiper.clientWidth || 1
-    const isLyric = swiper.scrollLeft > pageW * 0.4
-    el('dotPlayer').classList.toggle('active', !isLyric)
-    el('dotLyric').classList.toggle('active', isLyric)
-  }
-  swiper.addEventListener('scroll', syncDots, { passive: true })
 }
 
+// ===== 本地兜底:宿主状态不可用(加载竞态)时用上次快照渲染 =====
+function restoreSnapshot() {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return
+    const snap = JSON.parse(raw)
+    if (snap && snap.current_song) {
+      Object.assign(state, {
+        queue: snap.queue || [],
+        current_index: snap.current_index === undefined ? -1 : snap.current_index,
+        current_song: snap.current_song,
+        is_playing: false,
+        current_time: snap.current_time || 0,
+        duration: snap.duration || 0,
+        volume: snap.volume || 70,
+        play_mode: snap.play_mode || 'order',
+      })
+      render()
+      // 有播放列表时直接进入播放界面(需求:有播放列表在播放则显示播放界面)
+      autoOpened = true
+      openPlayerScreen()
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function persist() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      queue: state.queue,
+      current_index: state.current_index,
+      current_song: state.current_song,
+      current_time: state.current_time,
+      duration: state.duration,
+      volume: state.volume,
+      play_mode: state.play_mode,
+    }))
+  } catch (e) { /* ignore */ }
+}
+
+// ===== 视图切换 =====
+export function openPlayerScreen() {
+  el('playerScreen').style.display = 'flex'
+  showPlayerPage()
+}
+
+export function closePlayerScreen() {
+  el('playerScreen').style.display = 'none'
+}
+
+export function showPlayerPage() {
+  el('playerPage').style.display = ''
+  el('lyricPage').style.display = 'none'
+  el('playerTopTitle').textContent = '正在播放'
+}
+
+export function showLyricPage() {
+  el('playerPage').style.display = 'none'
+  el('lyricPage').style.display = ''
+  el('playerTopTitle').textContent = '歌词'
+  // 进入歌词页时重新同步歌词
+  const song = state.current_song
+  if (song) setLyricFor(song.id, song.lyric_url)
+}
+
+// ===== 渲染 =====
 function render() {
   try {
     _render()
@@ -137,19 +164,40 @@ function render() {
 
 function _render() {
   const song = state.current_song
+  const hasSong = !!song
+
+  // 迷你播放条
+  const mini = el('miniPlayer')
+  mini.style.display = hasSong ? 'flex' : 'none'
+  if (hasSong) {
+    el('miniTitle').textContent = song.title || '未知歌曲'
+    el('miniSub').textContent = [song.artist, song.album].filter(Boolean).join(' · ')
+    const mc = el('miniCover')
+    const mph = el('miniCoverPh')
+    if (song.cover_url) {
+      mc.src = song.cover_url
+      mc.style.display = 'block'
+      mph.style.display = 'none'
+    } else {
+      mc.style.display = 'none'
+      mph.style.display = 'inline-flex'
+    }
+    el('miniPlayBtn').querySelector('.material-symbols-outlined').textContent = state.is_playing ? 'pause' : 'play_arrow'
+  }
+
+  // 播放界面
+  el('songTitle').textContent = hasSong ? (song.title || '未知歌曲') : '未在播放'
+  el('songArtist').textContent = hasSong
+    ? ([song.artist, song.album].filter(Boolean).join(' · ') || '—')
+    : '点击搜索结果开始播放'
+
   const cover = el('cover')
   const coverPh = el('coverPh')
-
-  el('songTitle').textContent = song ? song.title : '未在播放'
-  el('songArtist').textContent = song
-    ? [song.artist, song.album].filter(Boolean).join(' · ')
-    : '搜索歌曲开始播放'
-
-  if (song && song.cover_url) {
+  if (hasSong && song.cover_url) {
     cover.src = song.cover_url
     cover.style.display = 'block'
     coverPh.style.display = 'none'
-    el('bgBlur').style.backgroundImage = `url("${song.cover_url}")`
+    el('bgBlur').style.backgroundImage = 'url("' + song.cover_url + '")'
   } else {
     cover.style.display = 'none'
     coverPh.style.display = 'flex'
@@ -157,7 +205,7 @@ function _render() {
   }
 
   const pt = el('platformTag')
-  if (song && song.source_data) {
+  if (hasSong && song.source_data) {
     try {
       const sd = typeof song.source_data === 'string' ? JSON.parse(song.source_data) : song.source_data
       pt.textContent = platformName(sd.platform)
@@ -166,24 +214,30 @@ function _render() {
   } else {
     pt.style.display = 'none'
   }
-  el('radioTag').style.display = song && song.type === 'radio' ? 'inline-block' : 'none'
 
-  // 播放/暂停
   el('playBtn').querySelector('.material-symbols-outlined').textContent = state.is_playing ? 'pause' : 'play_arrow'
 
-  // 播放模式
   const mi = el('modeBtn').querySelector('.material-symbols-outlined')
   mi.textContent = MODE_ICON[state.play_mode] || 'repeat'
   el('modeBtn').title = '播放模式: ' + (MODE_NAME[state.play_mode] || state.play_mode)
 
-  // 音量图标
   const vi = el('volumeBtn').querySelector('.material-symbols-outlined')
   vi.textContent = state.volume <= 0 ? 'volume_off' : state.volume < 50 ? 'volume_down' : 'volume_up'
   el('volumeSlider').value = state.volume
 
   renderProgress()
   renderQueue()
-  if (song && song.lyric_url) setLyricFor(song.id, song.lyric_url)
+
+  // 切歌时重新拉歌词
+  if (hasSong) {
+    const key = song.id + '|' + (song.lyric_url || '')
+    if (key !== lastSongKey) {
+      lastSongKey = key
+      setLyricFor(song.id, song.lyric_url)
+    }
+  } else {
+    lastSongKey = ''
+  }
 }
 
 function renderProgress() {
@@ -214,45 +268,156 @@ function renderQueue() {
     row.querySelector('.q-sub').textContent = [song.artist, song.album].filter(Boolean).join(' · ') || '—'
     row.querySelector('.q-del').addEventListener('click', (e) => {
       e.stopPropagation()
-      player.removeFromQueue(idx).catch(() => {})
+      if (player && typeof player.removeFromQueue === 'function') {
+        player.removeFromQueue(idx).catch(() => {})
+      }
     })
     row.addEventListener('click', () => {
       if (idx === state.current_index) return
-      player.play(song.id).catch((e) => snackbar('播放失败: ' + (e.message || e)))
+      if (player && typeof player.play === 'function') {
+        player.play(song.id).catch((e) => snackbar('播放失败: ' + (e.message || e)))
+      }
     })
     list.appendChild(row)
   })
 }
 
-/** 播放一组歌(替换队列从第 0 首开始) */
+// ===== 播放操作 =====
+/** 播放一组歌(替换队列从第 0 首开始),并展开全屏播放界面 */
 export function playSongs(songs, startIndex = 0) {
-  if (!player) return Promise.reject(new Error('宿主播放器不可用'))
-  return player.setQueue(songs.map((s) => s.id), { startIndex })
+  if (!hasPlayer()) return Promise.reject(new Error('宿主播放器不可用'))
+  return player.setQueue(songs.map((s) => s.id), { startIndex }).then(() => {
+    openPlayerScreen()
+  })
 }
 
 /** 加入队列末尾 */
 export function addToQueue(songs) {
-  if (!player) return Promise.reject(new Error('宿主播放器不可用'))
+  if (!hasPlayer()) return Promise.reject(new Error('宿主播放器不可用'))
   return player.addToQueue(songs.map((s) => s.id))
 }
 
-export function showPlayerView() {
-  el('searchView').classList.add('hidden')
-  el('playerView').classList.remove('hidden')
+// ===== UI 绑定 =====
+function bindUI() {
+  // 迷你播放条
+  const mini = el('miniPlayer')
+  mini.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return
+    openPlayerScreen()
+  })
+  el('miniPlayBtn').addEventListener('click', (e) => {
+    e.stopPropagation()
+    if (player) player.togglePlay().catch(() => {})
+  })
+  el('miniNextBtn').addEventListener('click', (e) => {
+    e.stopPropagation()
+    if (player) player.next().catch(() => {})
+  })
+
+  // 全屏播放界面:收起(折叠回搜索页)
+  el('collapsePlayerBtn').addEventListener('click', closePlayerScreen)
+
+  // 播放页 → 歌词页(点击封面/歌曲信息/歌词按钮)
+  const toggleToLyric = () => { if (state.current_song) showLyricPage() }
+  el('coverWrap').addEventListener('click', toggleToLyric)
+  const songInfo = el('songTitle').parentElement
+  if (songInfo) songInfo.addEventListener('click', toggleToLyric)
+  el('lyricToggleBtn').addEventListener('click', toggleToLyric)
+
+  // 歌词页 → 播放页(返回按钮 + 点击歌词空白处)
+  el('lyricBackBtn').addEventListener('click', showPlayerPage)
+  el('lyricPage').addEventListener('click', (e) => {
+    if (e.target.closest('.lyric-line')) return
+    showPlayerPage()
+  })
+
+  // 控制
+  el('playBtn').addEventListener('click', () => { if (player) player.togglePlay().catch(() => {}) })
+  el('prevBtn').addEventListener('click', () => { if (player) player.prev().catch(() => {}) })
+  el('nextBtn').addEventListener('click', () => { if (player) player.next().catch(() => {}) })
+  el('modeBtn').addEventListener('click', () => {
+    if (!player) return
+    const idx = MODES.indexOf(state.play_mode)
+    const next = MODES[(idx + 1) % MODES.length]
+    player.setPlayMode(next).then(() => snackbar('播放模式: ' + MODE_NAME[next])).catch(() => {})
+  })
+
+  // 进度条拖动
+  const track = el('progressTrack')
+  const posFromEvent = (e) => {
+    const rect = track.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+    return ratio * (state.duration || 0)
+  }
+  track.addEventListener('pointerdown', (e) => {
+    dragging = true
+    track.classList.add('dragging')
+    track.setPointerCapture(e.pointerId)
+    dragPreviewSec = posFromEvent(e)
+    renderProgress()
+  })
+  track.addEventListener('pointermove', (e) => {
+    if (!dragging) return
+    dragPreviewSec = posFromEvent(e)
+    renderProgress()
+  })
+  const endDrag = () => {
+    if (!dragging) return
+    dragging = false
+    track.classList.remove('dragging')
+    if (dragPreviewSec >= 0 && player && typeof player.seek === 'function') player.seek(dragPreviewSec).catch(() => {})
+    dragPreviewSec = -1
+  }
+  track.addEventListener('pointerup', endDrag)
+  track.addEventListener('pointercancel', endDrag)
+
+  // 音量
+  const slider = el('volumeSlider')
+  slider.addEventListener('input', () => {
+    const v = parseInt(slider.value, 10)
+    state.volume = v
+    if (player && typeof player.setVolume === 'function') player.setVolume(v).catch(() => {})
+  })
+
+  // 队列面板 / 音量面板
+  bindSheet('queueBackdrop', 'queueSheet', el('queueBtn'), [])
+  bindSheet('volumeBackdrop', 'volumeSheet', el('volumeBtn'), [])
+
+  // 收藏到歌单
+  el('favBtn').addEventListener('click', () => {
+    const song = state.current_song
+    if (!song) return snackbar('当前没有播放的歌曲')
+    openPlaylistPicker({ id: song.id, title: song.title, artist: song.artist, album: song.album, cover_url: song.cover_url })
+  })
+}
+
+// ===== 初始化 =====
+export function initPlayer() {
+  bindUI()
+
+  // 进度平滑 tick(宿主 current_time 可能不实时)
+  tickTimer = setInterval(() => {
+    if (!dragging && state.is_playing && state.duration > 0) {
+      state.current_time = Math.min(state.current_time + 0.5, state.duration)
+      renderProgress()
+    }
+  }, 500)
+
+  // 宿主播放器可能延迟注入:轮询等待
+  let tries = 0
+  const tryGet = () => {
+    if (getPlayer()) {
+      render()
+      persist()
+      return
+    }
+    tries++
+    if (tries < 20) setTimeout(tryGet, 400)
+    else restoreSnapshot()
+  }
+  tryGet()
 }
 
 export function getState() { return state }
 export function isReady() { return !!player }
-
-export function initPlayer() {
-  if (!hasClientPlayer()) {
-    // 宿主不可用(浏览器单独打开):控制区禁用并提示
-    ;['playBtn', 'prevBtn', 'nextBtn', 'modeBtn', 'volumeBtn', 'queueBtn'].forEach((id) => {
-      const b = document.getElementById(id)
-      if (b) b.style.opacity = '.35'
-    })
-    document.getElementById('songArtist').textContent = '提示:请在 Songloft 客户端内打开插件以获得完整播放器'
-    return
-  }
-  init()
-}
+export { hasClientPlayer }

@@ -36,11 +36,27 @@ const REQ_TIMEOUT_MS = 6000;
 const WY_LEVEL: Record<string, string> = { '128k': 'standard', '320k': 'exhigh', flac: 'lossless' };
 const QK_SIZE: Record<string, string> = { '128k': '128k', '320k': '320k', flac: 'flac' };
 
+// ===== 平台定义(前端搜索多选,与 static/js/search.js 的 PLATFORM_OPTIONS 对应)=====
+const ALL_PLATFORMS = ['wy', 'tx', 'kg']; // wy=网易云 tx=QQ kg=酷狗
+
 // ===== 配置 =====
-async function getConfig(): Promise<{ apiKey: string; quality: string }> {
+async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[] }> {
   const apiKey = ((await songloft.storage.get('api_key')) as string) || '';
   const quality = ((await songloft.storage.get('quality')) as string) || 'flac';
-  return { apiKey, quality };
+  let platforms: string[] = [...ALL_PLATFORMS];
+  try {
+    const raw = (await songloft.storage.get('platforms')) as string;
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        const clean = arr.map(String).filter((p) => ALL_PLATFORMS.includes(p));
+        if (clean.length) platforms = clean;
+      }
+    }
+  } catch {
+    /* 非法配置回退全选 */
+  }
+  return { apiKey, quality, platforms };
 }
 
 // ===== HTTP(QuickJS 真异步 fetch + Promise.race 超时,兼容无 AbortController)=====
@@ -77,14 +93,19 @@ async function chkszGet(path: string, params: Record<string, string>): Promise<a
   return body;
 }
 
-// ===== 搜索:三平台并发,单平台失败不影响整体;全失败时报聚合错误 =====
-async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
+// ===== 搜索:所选平台并发,单平台失败不影响整体;全失败时报聚合错误 =====
+// platforms 为空时使用插件设置的默认平台(默认全选)
+async function searchChksz(keyword: string, platforms?: string[]): Promise<SearchResultItem[]> {
+  const { platforms: cfgPlatforms } = await getConfig();
+  const targets = (platforms && platforms.length ? platforms : cfgPlatforms).filter((p) => ALL_PLATFORMS.includes(p));
+  const targetSet = new Set(targets);
   const items: SearchResultItem[] = [];
   const errors: string[] = [];
   const tasks: Promise<void>[] = [];
 
   // 网易云: data.songs[] = {id, name, artists, album, picUrl, duration(毫秒)}
-  tasks.push((async () => {
+  if (targetSet.has('wy')) {
+    tasks.push((async () => {
     try {
       const wy = await chkszGet('163_search', { keyword, limit: '5' });
       for (const s of wy.data?.songs || []) {
@@ -102,9 +123,11 @@ async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
       songloft.log.warn(`[chksz] 网易云搜索失败: ${e?.message || e}`);
     }
   })());
+  }
 
   // QQ: list[] = {n, name, singer, album, pay, mid}
-  tasks.push((async () => {
+  if (targetSet.has('tx')) {
+    tasks.push((async () => {
     try {
       const qq = await chkszGet('qq_music', { msg: keyword, num: '5' });
       for (const s of qq.list || []) {
@@ -121,9 +144,11 @@ async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
       songloft.log.warn(`[chksz] QQ搜索失败: ${e?.message || e}`);
     }
   })());
+  }
 
   // 酷狗: list[] = {n, id, name, singer, album, duration(秒)}
-  tasks.push((async () => {
+  if (targetSet.has('kg')) {
+    tasks.push((async () => {
     try {
       const kg = await chkszGet('kugou_music', { msg: keyword, num: '5' });
       for (const s of kg.list || []) {
@@ -140,11 +165,12 @@ async function searchChksz(keyword: string): Promise<SearchResultItem[]> {
       songloft.log.warn(`[chksz] 酷狗搜索失败: ${e?.message || e}`);
     }
   })());
+  }
 
   await Promise.all(tasks);
   if (!items.length && errors.length) {
-    // 全平台失败:透传首个错误,避免前端误判为「无结果」
-    throw new Error(`ChKSz 搜索失败(${errors.length}/3): ${errors[0]}`);
+    // 所选平台全部失败:透传首个错误,避免前端误判为「无结果」
+    throw new Error(`ChKSz 搜索失败(${errors.length}/${targets.length || 1}): ${errors[0]}`);
   }
   return items;
 }
@@ -195,16 +221,35 @@ async function fallbackSearch(hint: MusicUrlFallbackHint): Promise<FallbackMatch
 const router = createRouter();
 
 // 音源插件契约(宿主 SourceResolver / SourceFetcher)
-router.post('/api/search', createSearchHandler({ search: searchChksz }));
+// host 音源契约:按插件设置的默认平台搜索(createSearchHandler 只透传 keyword/page/pageSize,
+// 因此包一层,避免把 page 误当作 platforms)
+router.post('/api/search', createSearchHandler({ search: (keyword) => searchChksz(keyword) }));
+
+// 插件前端搜索:支持平台多选(wy/tx/kg);platforms 为空时用默认配置
+router.post('/api/search/select', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const keyword = String(body.keyword || '').trim();
+  if (!keyword) return jsonResponse({ error: 'keyword required' }, 400);
+  const reqPlatforms = Array.isArray(body.platforms)
+    ? body.platforms.map(String).filter((p) => ALL_PLATFORMS.includes(p))
+    : [];
+  try {
+    const results = await searchChksz(keyword, reqPlatforms.length ? reqPlatforms : undefined);
+    return jsonResponse({ results });
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 500);
+  }
+});
 router.post('/api/music/url', createMusicUrlHandler({ resolveUrl, fallbackSearch }));
 
 // 插件设置(API Key / 音质)
 router.get('/api/settings', async () => {
-  const { apiKey, quality } = await getConfig();
+  const { apiKey, quality, platforms } = await getConfig();
   return jsonResponse({
     api_key_set: !!apiKey,
     api_key_mask: apiKey ? `***${apiKey.slice(-4)}` : '',
     quality,
+    platforms,
   });
 });
 
@@ -215,6 +260,10 @@ router.post('/api/settings', async (req) => {
   }
   if (typeof body.quality === 'string' && ['128k', '320k', 'flac'].includes(body.quality)) {
     await songloft.storage.set('quality', body.quality);
+  }
+  if (Array.isArray(body.platforms)) {
+    const clean = body.platforms.map(String).filter((p) => ALL_PLATFORMS.includes(p));
+    if (clean.length) await songloft.storage.set('platforms', JSON.stringify(clean));
   }
   return jsonResponse({ ok: true });
 });
