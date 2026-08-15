@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（留空则自动生成日期版本，格式：Y.M.D）'
+        description: '语义化版本号，如 0.1.0 / 1.2.3（留空则自动从最新 vX.Y.Z 标签递增 patch；无历史标签时默认 0.1.0）'
         required: false
         default: ''
 
@@ -31,7 +31,22 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION="$(date +'%Y.%-m.%-d')"
+            # 自动递增:取最新 vX.Y.Z 标签 patch+1;无标签时默认 0.1.0
+            LATEST_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+            if [ -n "${LATEST_TAG}" ]; then
+              BASE="${LATEST_TAG#v}"
+              MAJOR="${BASE%%.*}"; REST="${BASE#*.}"
+              MINOR="${REST%%.*}"; PATCH="${REST#*.}"
+              PATCH=$((PATCH + 1))
+              VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            else
+              VERSION="0.1.0"
+            fi
+          fi
+          # 校验语义化版本号
+          if ! echo "${VERSION}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "错误: 版本号必须是 vX.Y.Z 语义化版本(如 0.1.0), 收到: ${VERSION}" >&2
+            exit 1
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Generated version: ${VERSION}"
@@ -101,3 +116,4 @@ jobs:
           git add plugin.json package.json
           git diff --staged --quiet || git commit -m "chore(release): bump to v${VERSION}"
           git push
+
