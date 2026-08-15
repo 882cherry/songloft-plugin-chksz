@@ -231,7 +231,9 @@ function playBrowseSong(s) {
         snackbar('导入失败:' + JSON.stringify(data))
         return
       }
-      return playSongs([{ id: data.id, title: data.title || s.title }]).catch((e) => snackbar('播放失败:' + (e.message || e)))
+      return playSongs([{ id: data.id, title: data.title || s.title }])
+        .then(() => snackbar('已开始播放: ' + (data.title || s.title)))
+        .catch((e) => snackbar('播放失败:' + (e.message || e)))
     })
     .catch((e) => snackbar('导入失败:' + (e.message || e)))
 }

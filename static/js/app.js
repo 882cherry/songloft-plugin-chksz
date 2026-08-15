@@ -2,10 +2,9 @@
 // 每个模块独立 try/catch 隔离:单个模块失败不影响其他(尤其保证搜索可用)
 
 import { snackbar } from './util.js'
-import { initPlayer, getState } from './player.js'
+import { initPlayer } from './player.js'
 import { initSearch } from './search.js'
 import { initConfig } from './config.js'
-import { initLyrics } from './lyrics.js'
 import { initPlaylists } from './playlists.js'
 import { initBrowse } from './browse.js'
 
@@ -21,7 +20,7 @@ function safe(fn, name) {
 }
 
 function init() {
-  // 播放器(迷你条 + 全屏播放界面)
+  // 播放器(仅等待宿主播放器注入,播放界面由宿主承担)
   safe(initPlayer, 'player')
 
   // 搜索(最高优先级:即使其他全挂也要保证可用)
@@ -30,17 +29,11 @@ function init() {
   // 配置弹窗(搜索栏设置按钮)
   safe(() => initConfig(null), 'config')
 
-  // 歌词同步(读播放器当前进度)
-  safe(() => initLyrics(() => getState().current_time), 'lyrics')
-
   // 收藏歌单
   safe(initPlaylists, 'playlists')
 
   // 首页浏览(平台标签 + 推荐/排行榜模块)
   safe(initBrowse, 'browse')
-
-  // 首次加载静默检查 Key
-  safe(checkKeyStatus, 'keyStatus')
 }
 
 // 等 DOM 就绪(module 脚本默认 defer,直接跑)
