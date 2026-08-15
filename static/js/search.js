@@ -4,6 +4,7 @@ import { api, hasClientPlayer } from './api.js'
 import { setStatus, snackbar, platformName } from './util.js'
 import { playSongs, addToQueue, openPlayerScreen } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
+import { openConfig } from './config.js'
 import { hideBrowse } from './browse.js'
 
 function el(id) { return document.getElementById(id) }
@@ -86,6 +87,24 @@ window.searchGo = function () {
     return
   }
   btn.disabled = true
+  // API Key 检查:未配置则引导到配置弹窗
+  api('api/settings')
+    .then((data) => {
+      if (!data || !data.api_key_set) {
+        btn.disabled = false
+        setStatus(st, '请先配置 API Key', 'err')
+        snackbar('请先配置 API Key')
+        openConfig()
+        return
+      }
+      doSearch(kw, st, btn)
+    })
+    .catch(() => doSearch(kw, st, btn))
+}
+
+function doSearch(kw, st, btn) {
+  const container = el('searchContainer')
+  if (container) container.style.display = 'block'
   setStatus(st, '搜索中(' + platformNames() + ')…')
   hideBrowse()
   api('api/search/select', { method: 'POST', body: JSON.stringify({ keyword: kw, platforms: selectedPlatforms }) })
@@ -93,7 +112,7 @@ window.searchGo = function () {
       btn.disabled = false
       const results = (data && data.results) || []
       if (!results.length) {
-        setStatus(st, '未找到结果(检查 API Key 是否有效)', 'err')
+        setStatus(st, '未找到结果', 'err')
         renderResults([])
         return
       }

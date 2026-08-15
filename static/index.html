@@ -600,9 +600,10 @@
         <div class="platform-bar" id="platformBar"></div>
         <div class="browse-tabs" id="browseTabs"></div>
         <div class="browse" id="browse"><div class="browse-loading">加载中…</div></div>
-        <div class="container">
+        <!-- 搜索结果容器:默认隐藏,搜索时显示(首页浏览区占满屏幕) -->
+        <div class="container" id="searchContainer" style="display:none">
             <div class="status muted" id="searchStatus"></div>
-            <div id="results"><div class="empty-state">选择平台(可多选),输入关键词开始搜索</div></div>
+            <div id="results"></div>
         </div>
     </div>
 

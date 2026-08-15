@@ -42,11 +42,13 @@ function renderTabs() {
   })
 }
 
-/** 回到浏览首页(清空搜索结果) */
+/** 回到浏览首页(清空搜索结果,隐藏结果容器) */
 function showHome() {
   el('results').innerHTML = ''
   el('searchStatus').textContent = ''
   el('searchInput').value = ''
+  const c = el('searchContainer')
+  if (c) c.style.display = 'none'
   el('browse').style.display = ''
   loadModules(currentTab)
 }

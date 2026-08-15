@@ -7,6 +7,9 @@ on:
         description: '语义化版本号，如 0.1.0 / 1.2.3（留空则自动从最新 vX.Y.Z 标签递增 patch；无历史标签时默认 0.1.0）'
         required: false
         default: ''
+  # 提交(含版本 bump)推送到 main 时自动构建发布;该版本已打过 tag 则跳过
+  push:
+    branches: [main]
 
 jobs:
   release:
@@ -28,30 +31,32 @@ jobs:
       - name: Resolve version
         id: version
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            # 手动触发且指定了版本:直接使用,允许重发
             VERSION="${{ github.event.inputs.version }}"
+            MODE="manual"
           else
-            # 自动递增:取最新 vX.Y.Z 标签 patch+1;无标签时默认 0.1.0
-            LATEST_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
-            if [ -n "${LATEST_TAG}" ]; then
-              BASE="${LATEST_TAG#v}"
-              MAJOR="${BASE%%.*}"; REST="${BASE#*.}"
-              MINOR="${REST%%.*}"; PATCH="${REST#*.}"
-              PATCH=$((PATCH + 1))
-              VERSION="${MAJOR}.${MINOR}.${PATCH}"
-            else
-              VERSION="0.1.0"
-            fi
+            # push 触发或未填版本:读取 plugin.json 当前版本,自动构建发布
+            VERSION="$(node -p "require('./plugin.json').version")"
+            MODE="auto"
           fi
           # 校验语义化版本号
           if ! echo "${VERSION}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "错误: 版本号必须是 vX.Y.Z 语义化版本(如 0.1.0), 收到: ${VERSION}" >&2
             exit 1
           fi
+          # auto 模式:该版本已打过 tag 则跳过发布(避免每次 push 重复构建)
+          if [ "${MODE}" = "auto" ] && git tag -l "v${VERSION}" | grep -q .; then
+            echo "release=v0"
+            echo "版本 v${VERSION} 已发布过,跳过"
+          else
+            echo "release=v1" >> $GITHUB_OUTPUT
+          fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Generated version: ${VERSION}"
+          echo "Generated version: ${VERSION} (${MODE})"
 
       - name: Update version in plugin.json / package.json
+        if: steps.version.outputs.release == 'v1'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           node -e "
@@ -64,9 +69,11 @@ jobs:
           "
 
       - name: Build
+        if: steps.version.outputs.release == 'v1'
         run: npm run build
 
       - name: Extract plugin info
+        if: steps.version.outputs.release == 'v1'
         id: plugin_info
         run: |
           ENTRY_PATH=$(node -p "require('./plugin.json').entryPath")
@@ -75,6 +82,7 @@ jobs:
           echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release on this repo
+        if: steps.version.outputs.release == 'v1'
         id: create_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,7 +91,7 @@ jobs:
           ZIP_NAME="${{ steps.plugin_info.outputs.zip_name }}"
           TAG="v${VERSION}"
 
-          # 删除已存在的同名 Release / Tag（重发版兼容）
+          # 删除已存在的同名 Release / Tag(重发版兼容)
           if gh release view "${TAG}" &>/dev/null; then
             gh release delete "${TAG}" --yes --cleanup-tag
           fi
@@ -98,6 +106,7 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Commit version bump on current branch
+        if: steps.version.outputs.release == 'v1'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           DOWNLOAD_URL="${{ steps.create_release.outputs.download_url }}"

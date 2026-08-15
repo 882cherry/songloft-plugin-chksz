@@ -73,17 +73,7 @@ function saveConfig() {
     })
 }
 
-/** 静默检查 Key 状态(首页提示) */
-export function checkKeyStatus() {
-  api('api/settings').then((data) => {
-    if (!data) return
-    const st = el('searchStatus')
-    if (data.api_key_set) {
-      st.textContent = '已配置 Key,可搜索'
-      st.className = 'status ok'
-    } else {
-      st.textContent = '未配置 API Key,点击左上角图标配置'
-      st.className = 'status err'
-    }
-  })
+/** 已配置 Key 与否(供搜索流程检查) */
+export function hasApiKey() {
+  return api('api/settings').then((data) => !!(data && data.api_key_set)).catch(() => true)
 }

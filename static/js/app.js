@@ -4,7 +4,7 @@
 import { snackbar } from './util.js'
 import { initPlayer, getState } from './player.js'
 import { initSearch } from './search.js'
-import { initConfig, checkKeyStatus } from './config.js'
+import { initConfig } from './config.js'
 import { initLyrics } from './lyrics.js'
 import { initPlaylists } from './playlists.js'
 import { initBrowse } from './browse.js'
@@ -28,7 +28,7 @@ function init() {
   safe(initSearch, 'search')
 
   // 配置弹窗(搜索栏设置按钮)
-  safe(() => initConfig(checkKeyStatus), 'config')
+  safe(() => initConfig(null), 'config')
 
   // 歌词同步(读播放器当前进度)
   safe(() => initLyrics(() => getState().current_time), 'lyrics')
