@@ -83,7 +83,7 @@ npm run dev              # 开发模式
 
 ### 5. 平台内容接口是网页逆向接口，随时可能变化
 网易云/QQ/酷狗**无官方开放 API**（与开源播放器一致，用网页端公开接口）：
-- 网易云：`music.163.com/api/personalized/playlist`（推荐歌单）、`/api/toplist`（排行榜）、`/api/playlist/detail?id=`（详情）
+- 网易云：`music.163.com/api/personalized/playlist`（推荐歌单）、`/api/toplist`（排行榜）、`/api/v6/playlist/detail?id=&n=1000`（完整 trackIds）+ `/api/v3/song/detail?c=[...]`（按 100 首/批补齐歌曲元数据；老 `/api/playlist/detail` 大歌单只返回 10 首完整 tracks，勿再使用）
 - QQ：`c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg`（歌单，未登录仅 1 条）、`fcg_myqq_toplist.fcg`（榜单列表，字段 `topTitle`）、`POST u.y.qq.com/cgi-bin/musicu.fcg`（歌单详情）、`fcg_v8_toplist_cp.fcg?topid=`（榜单详情，`songlist[].data.songmid`）
 - 酷狗：`mobilecdn.kugou.com/api/v3/rank/list`（榜单列表）、`m.kugou.com/rank/info/{id}?json=true`（榜单歌曲，`songs.list[].sqhash` 即解析 id）；**推荐歌单公开接口不可用**（Access Deny），酷狗模块只有排行榜
 - 接口变化时：先 curl 验证新结构再改 `browse*` 系列函数；`browseFetch` 带浏览器 UA + 必要 Referer

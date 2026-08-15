@@ -443,21 +443,51 @@ async function browseWy(): Promise<any> {
   };
 }
 
+// 网易云歌单详情:
+// /api/playlist/detail 老接口对大歌单只回传前 10 首完整 tracks;
+// 这里改用 /api/v6/playlist/detail 拿完整 trackIds,再按 100 个/批调 /api/v3/song/detail 补齐元数据。
+function mapWySong(t: any): any {
+  return {
+    title: t.name || '',
+    artist: (t.ar || t.artists || []).map((a: any) => a.name).join('/'),
+    album: t.al?.name || t.album?.name || '',
+    duration: Math.round((Number(t.dt ?? t.duration) || 0) / 1000),
+    cover_url: t.al?.picUrl || t.album?.picUrl || t.picUrl || undefined,
+    source_data: { platform: 'wy', id: String(t.id) },
+  };
+}
+
 async function browseWyPlaylist(id: string): Promise<any> {
   const d = await browseFetch(
-    'https://music.163.com/api/playlist/detail?id=' + encodeURIComponent(id),
+    'https://music.163.com/api/v6/playlist/detail?id=' + encodeURIComponent(id) + '&n=1000&s=0&t=0',
     { referer: 'https://music.163.com/' },
   );
-  const r = (d as any).result || {};
-  const songs = (r.tracks || []).map((t: any) => ({
-    title: t.name || '',
-    artist: (t.artists || []).map((a: any) => a.name).join('/'),
-    album: t.album?.name || '',
-    duration: Math.round((Number(t.duration) || 0) / 1000),
-    cover_url: t.album?.picUrl || t.picUrl || undefined,
-    source_data: { platform: 'wy', id: String(t.id) },
-  }));
-  return { title: r.name || '', cover: r.coverImgUrl || '', songs };
+  const r = (d as any).playlist || (d as any).result || {};
+  const trackIds: string[] = (r.trackIds || []).map((x: any) => String(x.id)).filter(Boolean);
+  const details = [...(r.tracks || [])];
+  const known = new Set(details.map((t: any) => String(t.id)));
+
+  // 补齐 v6 接口未返回完整 tracks 的歌曲(典型:推荐歌单 trackIds=64,但 tracks 只有 10)
+  const missing = trackIds.filter((sid) => !known.has(sid));
+  for (let i = 0; i < missing.length; i += 100) {
+    const chunk = missing.slice(i, i + 100);
+    const c = JSON.stringify(chunk.map((sid) => ({ id: Number(sid) })));
+    const resp = await browseFetch(
+      'https://music.163.com/api/v3/song/detail?c=' + encodeURIComponent(c),
+      { referer: 'https://music.163.com/' },
+    );
+    for (const s of (resp as any).songs || []) details.push(s);
+  }
+
+  const byId = new Map(details.map((t: any) => [String(t.id), t]));
+  const ordered = trackIds.length
+    ? trackIds.map((sid) => byId.get(sid)).filter(Boolean)
+    : details;
+  return {
+    title: r.name || '',
+    cover: r.coverImgUrl || '',
+    songs: ordered.map(mapWySong).filter((s: any) => s.source_data.id),
+  };
 }
 
 // ---- QQ 音乐:推荐歌单 + 排行榜(musicu.fcg 聚合接口) ----
