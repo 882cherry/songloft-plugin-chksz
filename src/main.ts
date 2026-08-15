@@ -93,6 +93,71 @@ async function chkszGet(path: string, params: Record<string, string>): Promise<a
   return body;
 }
 
+// ===== 搜索排序:topone 是单结果契约,不能依赖平台返回顺序,按关键词/hint 选最匹配 =====
+function norm(s: string): string {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[《》〈〉「」『』【】()（）\[\]{}<>.,，。!！?？:：;；"'“”‘’\s\-–—_/\\|~`@#$%^&*+=]+/g, '');
+}
+
+const COVER_MARKERS = [
+  'dj', 'live', 'demo', 'cover', '翻唱', '童声', '女声', '男声', '钢琴',
+  '吉他', '伴奏', '正式版', '治愈版', '柔情版', '网友改编', '清新版', '深情版',
+  '改编', '小提琴', '古筝', '现场',
+];
+
+function hasCoverMarker(title: string): boolean {
+  const t = String(title || '').toLowerCase();
+  return COVER_MARKERS.some((m) => t.includes(m));
+}
+
+function scoreTrack(item: SearchResultItem, keyword: string, hint?: { title?: string; artist?: string }): number {
+  const kw = norm(keyword);
+  const title = norm(item.title);
+  const artist = norm(item.artist);
+  const hintTitle = norm(hint?.title || '');
+  const hintArtist = norm(hint?.artist || '');
+  const q = hintTitle || kw;
+  let score = 0;
+  if (!q || !title) return score;
+
+  // 1) 标题完全命中
+  if (title === q || title === kw) score += 120;
+
+  // 2) 标题与查询互相包含(例如查询「周杰伦的稻香」命中标题「稻香」)
+  if (title.includes(q) || q.includes(title)) score += 70;
+
+  // 3) 歌手命中
+  if (artist) {
+    if (q.includes(artist)) score += 40;
+    if (hintArtist && (artist.includes(hintArtist) || hintArtist.includes(artist))) score += 50;
+  }
+
+  // 4) 组合式查询「歌手 歌名」「歌名 歌手」「歌手的歌名」:标题+歌手双命中
+  if (artist && kw) {
+    if (
+      kw === artist + '的' + title ||
+      kw === artist + ' ' + title ||
+      kw === title + ' ' + artist ||
+      kw === artist + title ||
+      kw === title + artist
+    ) {
+      score += 100;
+    } else if (kw.includes(title) && kw.includes(artist)) {
+      score += 50;
+    }
+  }
+
+  // 5) 标题带翻唱/现场/童声等标记降权,让原唱优先
+  if (hasCoverMarker(item.title)) score -= 30;
+
+  return score;
+}
+
+function rankResults(items: SearchResultItem[], keyword: string, hint?: { title?: string; artist?: string }): SearchResultItem[] {
+  return [...items].sort((a, b) => scoreTrack(b, keyword, hint) - scoreTrack(a, keyword, hint));
+}
+
 // ===== 搜索:所选平台并发,单平台失败不影响整体;全失败时报聚合错误 =====
 // platforms 为空时使用插件设置的默认平台(默认全选)
 async function searchChksz(keyword: string, platforms?: string[]): Promise<SearchResultItem[]> {
@@ -172,7 +237,7 @@ async function searchChksz(keyword: string, platforms?: string[]): Promise<Searc
     // 所选平台全部失败:透传首个错误,避免前端误判为「无结果」
     throw new Error(`ChKSz 搜索失败(${errors.length}/${targets.length || 1}): ${errors[0]}`);
   }
-  return items;
+  return rankResults(items, keyword);
 }
 
 // ===== 解析:source_data → 真实播放 URL =====
@@ -523,7 +588,8 @@ router.post('/api/search/topone', async (req) => {
   if (!keyword) return jsonResponse({ code: 1, msg: 'keyword required', data: null });
 
   try {
-    const results = await searchChksz(keyword);
+    const hint: { title?: string; artist?: string } | undefined = body.hint || undefined;
+    const results = rankResults(await searchChksz(keyword), keyword, hint);
     if (!results.length) return jsonResponse({ code: 1, msg: 'not found', data: null });
 
     const first = results[0];
