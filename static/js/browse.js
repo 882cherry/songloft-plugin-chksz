@@ -169,6 +169,29 @@ function renderPlaylist(data, item) {
   head.querySelector('.browse-detail-title').textContent = data.title || item.name
   head.querySelector('.browse-detail-sub').textContent = (data.songs || []).length + ' 首'
   box.appendChild(head)
+  // 全部导入曲库按钮(导入后可在宿主界面搜索/播放,插件静默提供解析)
+  const allSongs = data.songs || []
+  if (allSongs.length) {
+    const bar = document.createElement('div')
+    bar.className = 'batch-bar'
+    bar.innerHTML = '<button type="button" class="btn-filled" id="batchImportBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">download</span> 全部导入曲库(' + allSongs.length + ')</button>'
+    box.appendChild(bar)
+    bar.querySelector('#batchImportBtn').addEventListener('click', () => {
+      const btn = bar.querySelector('#batchImportBtn')
+      btn.disabled = true
+      let done = 0, failed = 0
+      const chain = allSongs.reduce((p, s) => p.then(() =>
+        api('api/import', { method: 'POST', body: JSON.stringify({ song: s }) })
+          .then(() => done++)
+          .catch(() => failed++)
+      ), Promise.resolve())
+      chain.then(() => {
+        btn.disabled = false
+        if (failed) snackbar('导入完成:' + done + ' 成功,' + failed + ' 失败')
+        else snackbar('已全部导入曲库(' + done + ' 首)')
+      })
+    })
+  }
 
   ;(data.songs || []).forEach((s) => {
     const row = document.createElement('div')

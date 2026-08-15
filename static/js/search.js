@@ -116,8 +116,9 @@ function doSearch(kw, st, btn) {
         renderResults([])
         return
       }
-      setStatus(st, '找到 ' + results.length + ' 首,点击播放或加入队列', 'ok')
+      setStatus(st, '找到 ' + results.length + ' 首', 'ok')
       renderResults(results)
+      renderBatchImport(results)
     })
     .catch((e) => {
       btn.disabled = false
@@ -132,7 +133,38 @@ export function initSearch() {
   // searchGoBtn 用 onclick 属性直连 window.searchGo(双保险),此处不重复绑定
 }
 
+// 批量导入按钮(把当前搜索结果全部导入宿主曲库,之后可在宿主界面搜索/播放)
+function renderBatchImport(results) {
+  const bar = document.createElement('div')
+  bar.className = 'batch-bar'
+  bar.innerHTML = '<button type="button" class="btn-filled" id="batchImportBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">download</span> 全部导入曲库(' + results.length + ')</button>'
+  const box = el('results')
+  box.parentNode.insertBefore(bar, box)
+  el('batchImportBtn').addEventListener('click', () => {
+    const btn = el('batchImportBtn')
+    if (!btn) return
+    btn.disabled = true
+    const st = el('searchStatus')
+    let done = 0, failed = 0
+    const total = results.length
+    setStatus(st, '正在导入 0/' + total + '…')
+    const chain = results.reduce((p, item) => p.then(() =>
+      api('api/import', { method: 'POST', body: JSON.stringify({ song: item }) })
+        .then(() => { done++; setStatus(st, '正在导入 ' + done + '/' + total + '…') })
+        .catch(() => { failed++ })
+    ), Promise.resolve())
+    chain.then(() => {
+      btn.disabled = false
+      if (failed) setStatus(st, '导入完成:' + done + ' 首成功,' + failed + ' 首失败', 'err')
+      else setStatus(st, '已全部导入曲库(' + done + ' 首),可在宿主曲库搜索/播放', 'ok')
+      snackbar('已导入 ' + done + ' 首到曲库')
+    })
+  })
+}
+
 function renderResults(results) {
+  const oldBar = document.querySelector('.batch-bar')
+  if (oldBar) oldBar.remove()
   const box = el('results')
   box.innerHTML = ''
   if (!results.length) {
