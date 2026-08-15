@@ -3,6 +3,7 @@
 import { api } from './api.js'
 import { snackbar } from './util.js'
 import { refreshNeteaseStatus } from './neteaseLogin.js'
+import { openLinkImport } from './importPlaylist.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -19,6 +20,11 @@ export function initConfig(onConfigSaved) {
   el('configCancelBtn').addEventListener('click', closeConfig)
   el('configBackdrop').addEventListener('click', closeConfig)
   el('saveConfigBtn').addEventListener('click', saveConfig)
+  const importLink = el('importLinkFromConfigBtn')
+  if (importLink) importLink.addEventListener('click', () => {
+    closeConfig()
+    openLinkImport()
+  })
 }
 
 export function openConfig() {

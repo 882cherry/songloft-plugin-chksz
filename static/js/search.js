@@ -18,30 +18,28 @@ const PLATFORM_OPTIONS = [
 const ALL_CODES = PLATFORM_OPTIONS.map((p) => p.code)
 let selectedPlatforms = [...ALL_CODES]
 
-// 渲染平台 chips(多选)
-function renderPlatforms() {
-  const bar = el('platformBar')
-  if (!bar) return
-  bar.innerHTML = ''
-  PLATFORM_OPTIONS.forEach((p) => {
-    const b = document.createElement('button')
-    b.type = 'button'
-    b.className = 'chip' + (selectedPlatforms.includes(p.code) ? ' on' : '')
-    b.title = '搜索' + p.name
-    b.innerHTML = '<span class="material-symbols-outlined">check</span>' + p.name
-    b.addEventListener('click', () => {
-      const on = selectedPlatforms.includes(p.code)
-      if (on && selectedPlatforms.length === 1) {
-        snackbar('至少保留一个搜索平台')
-        return
-      }
-      selectedPlatforms = on
-        ? selectedPlatforms.filter((c) => c !== p.code)
-        : [...selectedPlatforms, p.code]
-      renderPlatforms()
-      persistPlatforms()
-    })
-    bar.appendChild(b)
+// 渲染搜索平台多选下拉框(手机端更紧凑)
+function renderPlatformSelect() {
+  const sel = el('platformSelect')
+  if (!sel) return
+  Array.from(sel.options).forEach((o) => {
+    o.selected = selectedPlatforms.includes(o.value)
+  })
+}
+
+function bindPlatformSelect() {
+  const sel = el('platformSelect')
+  if (!sel) return
+  sel.addEventListener('change', () => {
+    const next = Array.from(sel.selectedOptions).map((o) => o.value)
+      .filter((c) => ALL_CODES.includes(c))
+    if (!next.length) {
+      snackbar('至少保留一个搜索平台')
+      renderPlatformSelect()
+      return
+    }
+    selectedPlatforms = next
+    persistPlatforms()
   })
 }
 
@@ -59,7 +57,7 @@ function loadPlatforms() {
         const clean = data.platforms.filter((c) => ALL_CODES.includes(c))
         if (clean.length) {
           selectedPlatforms = clean
-          renderPlatforms()
+          renderPlatformSelect()
         }
       }
     })
@@ -127,8 +125,9 @@ function doSearch(kw, st, btn) {
 }
 
 export function initSearch() {
-  // 平台 chips:渲染 + 加载已保存选择
-  renderPlatforms()
+  // 搜索平台多选下拉框:渲染 + 绑定 + 加载已保存选择
+  renderPlatformSelect()
+  bindPlatformSelect()
   loadPlatforms()
   // searchGoBtn 用 onclick 属性直连 window.searchGo(双保险),此处不重复绑定
 }

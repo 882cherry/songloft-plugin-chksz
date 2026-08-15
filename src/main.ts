@@ -91,14 +91,32 @@ function neteaseCookieHeader(cookie: string): string {
   return parts.join('; ');
 }
 
+function extractSetCookie(resp: any): string {
+  try {
+    const h = resp.headers;
+    if (!h) return '';
+    if (typeof h.get === 'function') {
+      const v = h.get('set-cookie');
+      if (Array.isArray(v)) return v.join('; ');
+      return String(v || '');
+    }
+    const v = h['set-cookie'] || h['Set-Cookie'] || h.set_cookie;
+    if (Array.isArray(v)) return v.join('; ');
+    if (typeof v === 'string') return v;
+  } catch {
+    /* ignore */
+  }
+  return '';
+}
+
 /** 网易云登录/账号接口请求(带桌面端 UA,支持自定义 Cookie) */
-async function neteaseApiFetch(url: string, opts?: { method?: string; body?: string; cookie?: string }): Promise<any> {
+async function neteaseApiFetchFull(url: string, opts?: { method?: string; body?: string; cookie?: string; exactCookie?: boolean; userAgent?: string }): Promise<{ body: any; setCookie: string }> {
   const headers: Record<string, string> = {
-    'User-Agent': WY_LOGIN_UA,
+    'User-Agent': opts?.userAgent || WY_LOGIN_UA,
     'Referer': 'https://music.163.com/',
     'Origin': 'https://music.163.com',
     'Accept': 'application/json, text/plain, */*',
-    'Cookie': neteaseCookieHeader(opts?.cookie || ''),
+    'Cookie': opts?.exactCookie ? (opts.cookie || '') : neteaseCookieHeader(opts?.cookie || ''),
   };
   if (opts?.body) headers['Content-Type'] = 'application/x-www-form-urlencoded';
   const timeoutPromise = new Promise<never>((_, reject) =>
@@ -109,7 +127,12 @@ async function neteaseApiFetch(url: string, opts?: { method?: string; body?: str
     timeoutPromise,
   ]);
   if (!resp.ok) throw new Error(`网易云 HTTP ${resp.status}`);
-  return await resp.json();
+  const setCookie = extractSetCookie(resp);
+  return { body: await resp.json(), setCookie };
+}
+
+async function neteaseApiFetch(url: string, opts?: { method?: string; body?: string; cookie?: string; exactCookie?: boolean; userAgent?: string }): Promise<any> {
+  return (await neteaseApiFetchFull(url, opts)).body;
 }
 
 // ===== HTTP(QuickJS 真异步 fetch + Promise.race 超时,兼容无 AbortController)=====
@@ -443,22 +466,106 @@ router.get('/api/netease/login/qr/check', async (req) => {
   const key = String(q.key || '').trim();
   if (!key) return jsonResponse({ code: 1, msg: 'key required', data: null });
   try {
-    const d = await neteaseApiFetch(
+    const full = await neteaseApiFetchFull(
       'https://music.163.com/api/login/qrcode/client/login?key=' + encodeURIComponent(key) + '&type=1',
     );
+    const d = full.body;
+    const cookie = (typeof d?.cookie === 'string' && d.cookie.trim()) ? d.cookie : full.setCookie;
     const code = Number(d?.code) || 0;
-    if (code === 803 && typeof d?.cookie === 'string' && d.cookie.trim()) {
-      await saveNeteaseLogin(d.cookie, d?.profile || { nickname: d?.nickname, avatarUrl: d?.avatarUrl });
+    if (code === 803 && cookie) {
+      await saveNeteaseLogin(cookie, d?.profile || { nickname: d?.nickname, avatarUrl: d?.avatarUrl });
     }
     return jsonResponse({
       code,
       msg: String(d?.message || ''),
-      logged_in: code === 803,
+      logged_in: code === 803 && !!cookie,
       nickname: d?.nickname || d?.profile?.nickname || '',
       avatar_url: d?.avatarUrl || d?.profile?.avatarUrl || '',
     });
   } catch (e: any) {
     return jsonResponse({ code: 1, msg: String(e?.message || e), data: null });
+  }
+});
+
+// ===== 网易云 EAPI(网页/手机号登录用) =====
+const WY_EAPI_KEY = 'e82ckenh8dichen8';
+
+function wyAesEcb(text: string): string {
+  return __go_crypto_aes_encrypt(__go_buffer_from(text, 'utf8'), 'ecb', __go_buffer_from(WY_EAPI_KEY, 'utf8'), '');
+}
+
+function wyEapi(uri: string, data: Record<string, unknown>): string {
+  const text = JSON.stringify(data);
+  const digest = __go_crypto_md5('nobody' + uri + 'use' + text + 'md5forencrypt');
+  const raw = uri + '-36cd479b6b5-' + text + '-36cd479b6b5-' + digest;
+  return wyAesEcb(raw).toUpperCase();
+}
+
+function buildWyEapiHeader(): Record<string, string> {
+  const now = Date.now();
+  const deviceId = __go_crypto_md5('chksz-' + now + '-' + Math.random());
+  return {
+    osver: 'Microsoft-Windows-10-Professional-build-22631-64bit',
+    deviceId,
+    os: 'pc',
+    appver: '3.0.18.203152',
+    versioncode: '140',
+    mobilename: '',
+    buildver: String(Math.floor(now / 1000)).slice(0, 10),
+    resolution: '1920x1080',
+    __csrf: '',
+    channel: 'netease',
+    requestId: now + '_' + String(Math.floor(Math.random() * 1000)).padStart(4, '0'),
+  };
+}
+
+function wyEapiCookie(header: Record<string, string>): string {
+  return Object.keys(header).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(header[k])).join('; ');
+}
+
+// 网页登录:手机号 + 密码(NetEase EAPI,登录成功后从响应头自动取 Cookie)
+async function neteaseCellphoneLogin(phone: string, countrycode: string, password: string): Promise<{ body: any; setCookie: string }> {
+  const header = buildWyEapiHeader();
+  const data: Record<string, unknown> = {
+    type: '1',
+    https: 'true',
+    phone,
+    countrycode: countrycode || '86',
+    password: __go_crypto_md5(password),
+    rememberLogin: 'true',
+    header,
+  };
+  const uri = '/api/w/login/cellphone';
+  const params = wyEapi(uri, data);
+  return await neteaseApiFetchFull('https://interface.music.163.com/eapi/w/login/cellphone', {
+    method: 'POST',
+    body: 'params=' + encodeURIComponent(params),
+    cookie: wyEapiCookie(header),
+    exactCookie: true,
+    userAgent: 'NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)',
+  });
+}
+
+// 网页登录:手机号 + 密码(登录成功后自动保存响应 Cookie)
+router.post('/api/netease/login/cellphone', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const phone = String(body.phone || '').trim();
+  const countrycode = String(body.countrycode || '86').trim();
+  const password = String(body.password || '');
+  if (!phone || !password) return jsonResponse({ error: 'phone and password required' }, 400);
+  try {
+    const { body: d, setCookie } = await neteaseCellphoneLogin(phone, countrycode, password);
+    const code = Number(d?.code) || 0;
+    if (code === 200 && setCookie) {
+      await saveNeteaseLogin(setCookie, d?.profile || d?.account || { nickname: d?.nickname || '', avatarUrl: d?.avatarUrl || '' });
+      return jsonResponse({ ok: true, logged_in: true, profile: d?.profile || d?.account || null });
+    }
+    if (code === 200) {
+      return jsonResponse({ error: '登录接口未返回 Cookie,请改用扫码或 Cookie 导入' }, 502);
+    }
+    return jsonResponse({ error: String(d?.message || d?.msg || `登录失败(${code || 'unknown'})`) }, 400);
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 502);
   }
 });
 

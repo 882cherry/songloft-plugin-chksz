@@ -89,13 +89,18 @@ async function pollQrStatus() {
     } else if (d.code === 802) {
       setQrStatus('已扫码，请在手机上确认登录')
     } else if (d.code === 803) {
-      setQrStatus('登录成功 ✓')
       stopQrPoll()
-      setTimeout(() => {
-        closeQrSheet()
-        refreshNeteaseStatus()
-        snackbar('网易云登录成功')
-      }, 400)
+      if (d.logged_in) {
+        setQrStatus('登录成功 ✓')
+        setTimeout(() => {
+          closeQrSheet()
+          refreshNeteaseStatus()
+          snackbar('网易云登录成功')
+        }, 400)
+      } else {
+        setQrStatus('扫码已确认，但未获取到 Cookie，请改用网页登录或 Cookie 导入', 'err')
+        setTimeout(closeQrSheet, 1500)
+      }
       return
     } else if (d.code === 800) {
       setQrStatus('二维码已过期，请重新打开', 'err')
@@ -113,14 +118,15 @@ async function pollQrStatus() {
   }
 }
 
-// ===== 网页登录 / Cookie 导入 =====
+// ===== 网页登录:手机号 + 密码,登录成功后自动保存 Cookie =====
 function openWebSheet() {
   el('wyWebBackdrop').style.display = 'block'
   requestAnimationFrame(() => el('wyWebSheet').classList.add('show'))
   setTimeout(() => el('wyWebSheet').classList.add('show'), 60)
   el('wyWebStatus').textContent = ''
   el('wyWebStatus').className = 'dialog-status'
-  el('wyCookieInput').value = ''
+  el('wyPassword').value = ''
+  el('wyWebSaveBtn').disabled = false
 }
 
 function closeWebSheet() {
@@ -128,20 +134,56 @@ function closeWebSheet() {
   el('wyWebSheet').classList.remove('show')
 }
 
-function openOfficialLogin() {
-  const a = document.createElement('a')
-  a.href = 'https://music.163.com/login'
-  a.target = '_blank'
-  a.rel = 'noopener'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-}
-
-async function saveWebCookie() {
-  const cookie = el('wyCookieInput').value.trim()
+async function submitWebLogin() {
+  const phone = el('wyPhone').value.trim()
+  const countrycode = el('wyPhoneCountry').value
+  const password = el('wyPassword').value
   const st = el('wyWebStatus')
   const btn = el('wyWebSaveBtn')
+  if (!phone || !password) {
+    st.textContent = '请输入手机号和密码'
+    st.className = 'dialog-status err'
+    return
+  }
+  btn.disabled = true
+  st.textContent = '登录中，正在自动获取 Cookie…'
+  st.className = 'dialog-status'
+  try {
+    const d = await api('api/netease/login/cellphone', {
+      method: 'POST',
+      body: JSON.stringify({ phone, countrycode, password }),
+    })
+    if (!d || !d.ok) throw new Error((d && d.error) || '登录失败')
+    closeWebSheet()
+    refreshNeteaseStatus()
+    snackbar('网易云登录成功')
+  } catch (e) {
+    btn.disabled = false
+    st.textContent = '登录失败：' + (e.message || e)
+    st.className = 'dialog-status err'
+  }
+}
+
+// ===== Cookie 导入(独立于网页登录) =====
+function openCookieSheet() {
+  el('wyCookieBackdrop').style.display = 'block'
+  requestAnimationFrame(() => el('wyCookieSheet').classList.add('show'))
+  setTimeout(() => el('wyCookieSheet').classList.add('show'), 60)
+  el('wyCookieStatus').textContent = ''
+  el('wyCookieStatus').className = 'dialog-status'
+  el('wyCookieInput').value = ''
+  el('wyCookieSaveBtn').disabled = false
+}
+
+function closeCookieSheet() {
+  el('wyCookieBackdrop').style.display = 'none'
+  el('wyCookieSheet').classList.remove('show')
+}
+
+async function saveCookieImport() {
+  const cookie = el('wyCookieInput').value.trim()
+  const st = el('wyCookieStatus')
+  const btn = el('wyCookieSaveBtn')
   if (!cookie) {
     st.textContent = '请粘贴 MUSIC_U 或 Cookie'
     st.className = 'dialog-status err'
@@ -153,9 +195,9 @@ async function saveWebCookie() {
   try {
     const d = await api('api/netease/login/cookie', { method: 'POST', body: JSON.stringify({ cookie }) })
     if (!d || !d.ok) throw new Error((d && d.error) || '登录失败')
-    closeWebSheet()
+    closeCookieSheet()
     refreshNeteaseStatus()
-    snackbar('网易云登录成功')
+    snackbar('网易云 Cookie 登录成功')
   } catch (e) {
     btn.disabled = false
     st.textContent = '登录失败：' + (e.message || e)
@@ -178,11 +220,20 @@ export function initNeteaseLogin() {
   el('wyQrLoginBtn').addEventListener('click', startQrLogin)
   el('wyQrCancelBtn').addEventListener('click', closeQrSheet)
   el('wyQrBackdrop').addEventListener('click', closeQrSheet)
+
   el('wyWebLoginBtn').addEventListener('click', openWebSheet)
   el('wyWebCancelBtn').addEventListener('click', closeWebSheet)
   el('wyWebBackdrop').addEventListener('click', closeWebSheet)
-  el('wyOpenWebBtn').addEventListener('click', openOfficialLogin)
-  el('wyWebSaveBtn').addEventListener('click', saveWebCookie)
+  el('wyWebSaveBtn').addEventListener('click', submitWebLogin)
+  el('wyPassword').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitWebLogin()
+  })
+
+  el('wyCookieLoginBtn').addEventListener('click', openCookieSheet)
+  el('wyCookieCancelBtn').addEventListener('click', closeCookieSheet)
+  el('wyCookieBackdrop').addEventListener('click', closeCookieSheet)
+  el('wyCookieSaveBtn').addEventListener('click', saveCookieImport)
+
   el('wyLogoutBtn').addEventListener('click', logoutNetease)
   refreshNeteaseStatus()
 }
