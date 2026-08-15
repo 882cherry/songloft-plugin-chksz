@@ -4,7 +4,7 @@ import { api } from './api.js'
 import { snackbar, platformName, fmtTime } from './util.js'
 import { playSongs } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
-import { openImportPlaylist } from './importPlaylist.js'
+import { openImportPlaylist, openLinkImport } from './importPlaylist.js'
 
 const TABS = [
   { code: 'wy', name: '网易云' },
@@ -41,6 +41,13 @@ function renderTabs() {
     })
     bar.appendChild(b)
   })
+  // 分享链接导入入口(自动识别网易云/QQ/酷狗分享链接)
+  const link = document.createElement('button')
+  link.type = 'button'
+  link.className = 'browse-tab link-import'
+  link.innerHTML = '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">link</span> 导入分享链接'
+  link.addEventListener('click', openLinkImport)
+  bar.appendChild(link)
 }
 
 /** 回到浏览首页(清空搜索结果,隐藏结果容器) */

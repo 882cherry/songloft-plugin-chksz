@@ -603,10 +603,116 @@ router.get('/api/browse/playlist', async (req) => {
   }
 });
 
+// ===== 分享链接解析(网易云/QQ/酷狗) =====
+type ParsedPlaylistLink = { platform: string; id: string };
+
+function parsePlaylistLink(input: string): ParsedPlaylistLink | null {
+  const s = String(input || '').trim();
+  if (!s) return null;
+
+  // 网易云: https://music.163.com/m/playlist?id=xxx 或 #/playlist?id=xxx
+  if (/music\.163\.com/.test(s)) {
+    const m = s.match(/[?&#]id=(\d+)/) || s.match(/playlist\/(\d+)/);
+    if (m) return { platform: 'wy', id: m[1] };
+  }
+
+  // QQ音乐: taoge.html?id=xxx、playlist/xxx、share/details/taoge.html?id=xxx
+  if (/y\.qq\.com/.test(s)) {
+    const m = s.match(/[?&#]id=(\d+)/) || s.match(/playlist\/(\d+)/) || s.match(/taoge\/(\d+)/);
+    if (m) return { platform: 'tx', id: m[1] };
+  }
+
+  // 酷狗: 优先取 global_collection_id;兼容 gcid_xxx(需分享链接同时带 collection id)
+  if (/kugou\.com/.test(s)) {
+    const coll = s.match(/global_collection_id=(collection_\d+_\d+_\d+_\d+)/)
+      || s.match(/[?&#]global_collection_id=(collection_\d+_\d+_\d+_\d+)/);
+    if (coll) return { platform: 'kg', id: coll[1] };
+    const gcid = s.match(/gcid_([a-z0-9]+)/i);
+    if (gcid) return { platform: 'kg', id: 'gcid_' + gcid[1].toLowerCase() };
+    const special = s.match(/special\/single\/(\d+)/);
+    if (special) return { platform: 'kg', id: 'special:' + special[1] };
+  }
+  return null;
+}
+
+// ===== 酷狗 collection 歌单(分享链接里的 global_collection_id) =====
+const KG_DFID = '-';
+const KG_APPID = '1005';
+const KG_CLIENTVER = '20489';
+const KG_SIGNKEY = 'OIlwieks28dk2k092lksi2UIkp';
+const KG_MAX_PAGES = 10; // 每页 100,最多导入 1000 首,避免路由器/低配设备被超大歌单击穿
+
+function md5Hex(s: string): string {
+  return __go_crypto_md5(s);
+}
+
+function kgSignedParams(params: Record<string, string | number>): Record<string, string> {
+  const now = Math.floor(Date.now() / 1000);
+  const base: Record<string, string | number> = {
+    token: '', userid: '0', appid: KG_APPID, clientver: KG_CLIENTVER,
+    dfid: KG_DFID, mid: md5Hex(KG_DFID), uuid: md5Hex(KG_DFID), clienttime: String(now),
+  };
+  Object.assign(base, params);
+  const keys = Object.keys(base).sort();
+  const raw = keys.map((k) => k + '=' + base[k]).join('');
+  const out: Record<string, string> = {};
+  keys.forEach((k) => { out[k] = String(base[k]); });
+  out.signature = md5Hex(KG_SIGNKEY + raw + KG_SIGNKEY);
+  return out;
+}
+
+function kgQueryString(params: Record<string, string | number>): string {
+  return Object.entries(kgSignedParams(params)).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+}
+
+async function browseKgCollection(collectionId: string): Promise<{ title: string; cover: string; songs: any[] }> {
+  const songs: any[] = [];
+  let title = '酷狗歌单';
+  let cover = '';
+  for (let page = 0; page < KG_MAX_PAGES; page++) {
+    const qs = kgQueryString({
+      global_collection_id: collectionId,
+      pagesize: 100,
+      plat: 1,
+      type: 1,
+      mode: 1,
+      area_code: 1,
+      begin_idx: page * 100,
+    });
+    const resp = await browseFetch('https://gateway.kugou.com/pubsongs/v2/get_other_list_file_nofilt?' + qs, {
+      referer: 'https://m.kugou.com/',
+    });
+    const data = (resp as any).data || {};
+    const listInfo = data.list_info || {};
+    if (page === 0) {
+      title = listInfo.name || title;
+      cover = String(listInfo.pic || '').replace('{size}', '400');
+    }
+    for (const item of data.songs || []) {
+      songs.push({
+        title: item.remark || item.name || '',
+        artist: (item.singerinfo || []).map((x: any) => x.name).filter(Boolean).join('/'),
+        album: item.albuminfo?.name || '',
+        duration: Math.round((Number(item.timelen) || 0) / 1000),
+        cover_url: String(item.cover || cover).replace('{size}', '400'),
+        source_data: { platform: 'kg', id: String(item.hash || '') },
+      });
+    }
+    const count = Number(data.count) || songs.length;
+    if (songs.length >= count || (data.songs || []).length < 100) break;
+  }
+  return { title, cover, songs: songs.filter((s) => s.source_data.id) };
+}
+
 // ===== 歌单导入到宿主 =====
 async function fetchPlaylistDetail(platform: string, id: string): Promise<{ title: string; cover: string; songs: any[] }> {
   if (platform === 'tx') return await browseTxPlaylist(id);
-  if (platform === 'kg') return await browseKgPlaylist(id);
+  if (platform === 'kg') {
+    if (id.startsWith('collection_')) return await browseKgCollection(id);
+    if (id.startsWith('gcid_')) throw new Error('酷狗链接缺少 global_collection_id,请重新分享并粘贴包含 global_collection_id 的链接');
+    if (id.startsWith('special:')) throw new Error('暂不支持旧版 special 酷狗链接,请使用带 global_collection_id 的新版分享链接');
+    return await browseKgPlaylist(id);
+  }
   return await browseWyPlaylist(id);
 }
 
@@ -619,8 +725,17 @@ function platformLabel(platform: string): string {
 // 导入歌单:抓取源歌单/榜单歌曲 → 逐首入库(去重)→ 创建宿主歌单 → 批量加入
 router.post('/api/playlist/import', async (req) => {
   const body = JSON.parse((req.body as string) || '{}');
-  const platform = String(body.platform || '');
-  const id = String(body.id || '');
+  const rawLink = String(body.url || body.link || body.text || '').trim();
+  let platform = String(body.platform || '');
+  let id = String(body.id || '');
+
+  // 支持直接粘贴分享链接/分享文本(网易云/QQ/酷狗),自动识别平台和歌单 id
+  if (rawLink) {
+    const parsed = parsePlaylistLink(rawLink);
+    if (!parsed) return jsonResponse({ error: '无法识别分享链接,请粘贴包含歌单 id 的网易云/QQ/酷狗分享链接' }, 400);
+    platform = parsed.platform;
+    id = parsed.id;
+  }
   if (!ALL_PLATFORMS.includes(platform)) return jsonResponse({ error: 'platform must be wy/tx/kg' }, 400);
   if (!id) return jsonResponse({ error: 'id required' }, 400);
 

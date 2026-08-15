@@ -96,6 +96,14 @@
             background: var(--md-surface); color: var(--md-on-surface); min-width: 0;
         }
         .text-field:focus { outline: 2px solid var(--md-primary); border-color: transparent; }
+        .text-area {
+            width: 100%; min-height: 84px; resize: vertical;
+            padding: 10px 12px; font-size: 13px; line-height: 1.5;
+            border: 1px solid var(--md-outline); border-radius: var(--md-radius-sm);
+            background: var(--md-surface); color: var(--md-on-surface);
+            font-family: inherit;
+        }
+        .text-area:focus { outline: 2px solid var(--md-primary); border-color: transparent; }
         .select-field {
             width: 100%; padding: 10px 12px; font-size: 14px;
             border: 1px solid var(--md-outline); border-radius: var(--md-radius-sm);
@@ -196,6 +204,12 @@
             cursor: pointer;
         }
         .browse-tab.on { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
+        .browse-tab.link-import {
+            margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+            background: var(--md-primary-container); border-color: transparent;
+            color: var(--md-on-primary-container); white-space: nowrap;
+        }
+        [data-theme="dark"] .browse-tab.link-import { background: var(--md-primary); color: var(--md-on-primary); }
         .browse { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 68px; }
         .browse-module { margin-bottom: 18px; }
         .browse-module-title {
@@ -354,6 +368,25 @@
         <div class="sheet-footer">
             <button class="btn-text" id="importCancelBtn">取消</button>
             <button class="btn-filled" id="importConfirmBtn">开始导入</button>
+        </div>
+    </div>
+
+    <!-- ===== 分享链接导入歌单面板 ===== -->
+    <div class="menu-backdrop" id="linkImportBackdrop" style="display:none"></div>
+    <div class="bottom-sheet" id="linkImportSheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">导入分享歌单</div>
+        <div class="dialog-body">
+            <label for="linkImportUrl">分享链接 / 分享文本</label>
+            <textarea class="text-area" id="linkImportUrl" placeholder="粘贴网易云、QQ音乐或酷狗的分享链接，例如：&#10;分享歌单: xxx https://music.163.com/m/playlist?id=7244423285"></textarea>
+            <div class="dialog-hint">自动识别平台和歌单 ID，无需手动选择。</div>
+            <label for="linkImportName">歌单名称（可选）</label>
+            <input type="text" class="text-field" id="linkImportName" placeholder="留空则使用源歌单名称" maxlength="60">
+        </div>
+        <div class="dialog-status" id="linkImportStatus"></div>
+        <div class="sheet-footer">
+            <button class="btn-text" id="linkImportCancelBtn">取消</button>
+            <button class="btn-filled" id="linkImportConfirmBtn">解析并导入</button>
         </div>
     </div>
 

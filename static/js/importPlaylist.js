@@ -71,11 +71,73 @@ function confirmImport() {
     })
 }
 
+
+// ===== 分享链接导入(自动识别 网易云/QQ/酷狗) =====
+function openLinkSheet() {
+  el('linkImportBackdrop').style.display = 'block'
+  requestAnimationFrame(() => el('linkImportSheet').classList.add('show'))
+  setTimeout(() => el('linkImportSheet').classList.add('show'), 60)
+}
+
+function closeLinkSheet() {
+  el('linkImportBackdrop').style.display = 'none'
+  el('linkImportSheet').classList.remove('show')
+}
+
+export function openLinkImport() {
+  el('linkImportUrl').value = ''
+  el('linkImportName').value = ''
+  el('linkImportStatus').textContent = ''
+  el('linkImportStatus').className = 'dialog-status'
+  el('linkImportConfirmBtn').disabled = false
+  openLinkSheet()
+  setTimeout(() => el('linkImportUrl').focus(), 150)
+}
+
+function confirmLinkImport() {
+  const url = el('linkImportUrl').value.trim()
+  const name = el('linkImportName').value.trim()
+  const st = el('linkImportStatus')
+  const btn = el('linkImportConfirmBtn')
+  if (!url) {
+    st.textContent = '请粘贴分享链接或分享文本'
+    st.className = 'dialog-status err'
+    return
+  }
+  btn.disabled = true
+  st.textContent = '正在解析链接并导入…'
+  st.className = 'dialog-status'
+  api('api/playlist/import', {
+    method: 'POST',
+    body: JSON.stringify({ url, name: name || '' }),
+  })
+    .then((data) => {
+      if (!data || !data.ok) throw new Error((data && data.error) || '导入失败')
+      closeLinkSheet()
+      snackbar('已导入歌单「' + data.playlist.name + '」（' + data.imported + ' 首）')
+    })
+    .catch((e) => {
+      btn.disabled = false
+      st.textContent = '导入失败：' + (e.message || e)
+      st.className = 'dialog-status err'
+    })
+}
+
 export function initImportPlaylist() {
   el('importBackdrop').addEventListener('click', closeSheet)
   el('importCancelBtn').addEventListener('click', closeSheet)
   el('importConfirmBtn').addEventListener('click', confirmImport)
   el('importPlaylistName').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') confirmImport()
+  })
+
+  el('linkImportBackdrop').addEventListener('click', closeLinkSheet)
+  el('linkImportCancelBtn').addEventListener('click', closeLinkSheet)
+  el('linkImportConfirmBtn').addEventListener('click', confirmLinkImport)
+  el('linkImportUrl').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) confirmLinkImport()
+  })
+  el('linkImportName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmLinkImport()
   })
 }
