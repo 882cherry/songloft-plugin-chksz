@@ -327,8 +327,13 @@ async function neteaseOfficialUrl(songId: string, quality: string, cookie: strin
     'https://music.163.com/api/song/enhance/player/url?ids=' + encodeURIComponent(ids) + '&br=' + br,
     { cookie },
   );
-  const url = d?.data?.[0]?.url;
+  const entry = d?.data?.[0];
+  const url = entry?.url;
   if (typeof url !== 'string' || !/^https?:/i.test(url)) throw new Error('网易云官方接口未返回有效播放链接');
+  // VIP/付费歌曲官方接口只回 30s 试听(freeTrialInfo 非空 或 fee>0 且 payed=0),
+  // 试听链接也是合法 http URL,必须显式识别,否则不会回退 ChKSz → 播放 30 秒试听
+  const isTrial = entry?.freeTrialInfo != null || (Number(entry?.fee) > 0 && !entry?.payed);
+  if (isTrial) throw new Error('网易云官方接口仅返回试听(VIP 歌曲),回退 ChKSz 解析');
   return url;
 }
 
