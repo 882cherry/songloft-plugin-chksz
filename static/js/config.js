@@ -2,6 +2,7 @@
 
 import { api } from './api.js'
 import { snackbar } from './util.js'
+import { refreshNeteaseStatus } from './neteaseLogin.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -30,6 +31,7 @@ export function openConfig() {
     if (!data) return
     const keyEl = el('apiKey')
     const qEl = el('quality')
+    refreshNeteaseStatus()
     if (data.api_key_set) {
       keyEl.placeholder = '已配置(' + data.api_key_mask + '),留空不修改'
       el('apiKeyHint').textContent = '已配置,留空保存则不修改'

@@ -59,6 +59,59 @@ async function getConfig(): Promise<{ apiKey: string; quality: string; platforms
   return { apiKey, quality, platforms };
 }
 
+// ===== 网易云登录(扫码 / Cookie 导入) =====
+const WY_LOGIN_UA =
+  'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/2.10.2.200154';
+const WY_BASE_COOKIE = 'os=pc; appver=2.10.2.200154';
+const WY_COOKIE_KEY = 'netease_cookie';
+const WY_PROFILE_KEY = 'netease_profile';
+
+async function getNeteaseCookie(): Promise<string> {
+  return String((await songloft.storage.get(WY_COOKIE_KEY)) || '').trim();
+}
+
+async function getNeteaseProfile(): Promise<any> {
+  try {
+    const raw = (await songloft.storage.get(WY_PROFILE_KEY)) as string;
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function saveNeteaseLogin(cookie: string, profile: any): Promise<void> {
+  await songloft.storage.set(WY_COOKIE_KEY, cookie.trim());
+  if (profile) await songloft.storage.set(WY_PROFILE_KEY, JSON.stringify(profile));
+}
+
+function neteaseCookieHeader(cookie: string): string {
+  const parts = [WY_BASE_COOKIE];
+  if (cookie) parts.push(cookie);
+  return parts.join('; ');
+}
+
+/** 网易云登录/账号接口请求(带桌面端 UA,支持自定义 Cookie) */
+async function neteaseApiFetch(url: string, opts?: { method?: string; body?: string; cookie?: string }): Promise<any> {
+  const headers: Record<string, string> = {
+    'User-Agent': WY_LOGIN_UA,
+    'Referer': 'https://music.163.com/',
+    'Origin': 'https://music.163.com',
+    'Accept': 'application/json, text/plain, */*',
+    'Cookie': neteaseCookieHeader(opts?.cookie || ''),
+  };
+  if (opts?.body) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('网易云登录请求超时')), REQ_TIMEOUT_MS),
+  );
+  const resp: any = await Promise.race([
+    fetch(url, { method: opts?.method || 'GET', headers, body: opts?.body }),
+    timeoutPromise,
+  ]);
+  if (!resp.ok) throw new Error(`网易云 HTTP ${resp.status}`);
+  return await resp.json();
+}
+
 // ===== HTTP(QuickJS 真异步 fetch + Promise.race 超时,兼容无 AbortController)=====
 async function chkszGet(path: string, params: Record<string, string>): Promise<any> {
   const { apiKey } = await getConfig();
@@ -241,11 +294,34 @@ async function searchChksz(keyword: string, platforms?: string[]): Promise<Searc
 }
 
 // ===== 解析:source_data → 真实播放 URL =====
+const WY_BR: Record<string, number> = { '128k': 128000, '320k': 320000, flac: 999000 };
+
+/** 已登录时优先走网易云官方播放接口(可解析 VIP/付费歌曲),失败再回退 ChKSz */
+async function neteaseOfficialUrl(songId: string, quality: string, cookie: string): Promise<string> {
+  const br = WY_BR[quality] || 999000;
+  const ids = '[' + songId + ']';
+  const d = await neteaseApiFetch(
+    'https://music.163.com/api/song/enhance/player/url?ids=' + encodeURIComponent(ids) + '&br=' + br,
+    { cookie },
+  );
+  const url = d?.data?.[0]?.url;
+  if (typeof url !== 'string' || !/^https?:/i.test(url)) throw new Error('网易云官方接口未返回有效播放链接');
+  return url;
+}
+
 async function resolveUrl(sourceData: Record<string, unknown>): Promise<ResolvedMusicUrl> {
   const platform = String(sourceData.platform || '');
   const { quality } = await getConfig();
 
   if (platform === 'wy') {
+    const wyCookie = await getNeteaseCookie();
+    if (wyCookie) {
+      try {
+        return { url: await neteaseOfficialUrl(String(sourceData.id), quality, wyCookie) };
+      } catch (e: any) {
+        songloft.log.warn(`[chksz] 网易云官方解析失败,回退 ChKSz: ${e?.message || e}`);
+      }
+    }
     const r = await chkszGet('163_music', {
       id: String(sourceData.id),
       level: WY_LEVEL[quality] || 'lossless',
@@ -310,11 +386,17 @@ router.post('/api/music/url', createMusicUrlHandler({ resolveUrl, fallbackSearch
 // 插件设置(API Key / 音质)
 router.get('/api/settings', async () => {
   const { apiKey, quality, platforms } = await getConfig();
+  const wyProfile = await getNeteaseProfile();
   return jsonResponse({
     api_key_set: !!apiKey,
     api_key_mask: apiKey ? `***${apiKey.slice(-4)}` : '',
     quality,
     platforms,
+    netease_login: {
+      logged_in: !!(await getNeteaseCookie()),
+      nickname: wyProfile?.nickname || wyProfile?.profile?.nickname || '',
+      avatar_url: wyProfile?.avatarUrl || wyProfile?.profile?.avatarUrl || '',
+    },
   });
 });
 
@@ -330,6 +412,85 @@ router.post('/api/settings', async (req) => {
     const clean = body.platforms.map(String).filter((p) => ALL_PLATFORMS.includes(p));
     if (clean.length) await songloft.storage.set('platforms', JSON.stringify(clean));
   }
+  return jsonResponse({ ok: true });
+});
+
+// ===== 网易云登录:扫码 / Cookie 导入 =====
+router.get('/api/netease/login/status', async () => {
+  const profile = await getNeteaseProfile();
+  return jsonResponse({
+    logged_in: !!(await getNeteaseCookie()),
+    nickname: profile?.nickname || profile?.profile?.nickname || '',
+    avatar_url: profile?.avatarUrl || profile?.profile?.avatarUrl || '',
+  });
+});
+
+// 获取扫码登录 key(前端用 key 生成二维码 / 打开网易云登录页)
+router.get('/api/netease/login/qr', async () => {
+  try {
+    const d = await neteaseApiFetch('https://music.163.com/api/login/qrcode/unikey?type=1');
+    const key = String(d?.unikey || d?.data?.unikey || '');
+    if (!key) throw new Error('网易云未返回 unikey');
+    return jsonResponse({ ok: true, key, url: 'https://music.163.com/login?codekey=' + encodeURIComponent(key) });
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// 轮询扫码结果;code=803 时自动保存 Cookie 和用户信息
+router.get('/api/netease/login/qr/check', async (req) => {
+  const q = parseQuery(req.query || '');
+  const key = String(q.key || '').trim();
+  if (!key) return jsonResponse({ code: 1, msg: 'key required', data: null });
+  try {
+    const d = await neteaseApiFetch(
+      'https://music.163.com/api/login/qrcode/client/login?key=' + encodeURIComponent(key) + '&type=1',
+    );
+    const code = Number(d?.code) || 0;
+    if (code === 803 && typeof d?.cookie === 'string' && d.cookie.trim()) {
+      await saveNeteaseLogin(d.cookie, d?.profile || { nickname: d?.nickname, avatarUrl: d?.avatarUrl });
+    }
+    return jsonResponse({
+      code,
+      msg: String(d?.message || ''),
+      logged_in: code === 803,
+      nickname: d?.nickname || d?.profile?.nickname || '',
+      avatar_url: d?.avatarUrl || d?.profile?.avatarUrl || '',
+    });
+  } catch (e: any) {
+    return jsonResponse({ code: 1, msg: String(e?.message || e), data: null });
+  }
+});
+
+// 网页登录 / Cookie 导入:验证 MUSIC_U 并保存
+function normalizeWYCookie(input: string): string {
+  let s = String(input || '').trim();
+  if (!s) return '';
+  s = s.replace(/^["']|["']$/g, '');
+  if (s.includes('MUSIC_U=')) return s;
+  return 'MUSIC_U=' + s;
+}
+
+router.post('/api/netease/login/cookie', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const cookie = normalizeWYCookie(body.cookie);
+  if (!cookie) return jsonResponse({ error: 'cookie required' }, 400);
+  try {
+    const d = await neteaseApiFetch('https://music.163.com/api/nuser/account/get', { cookie });
+    const profile = d?.profile || d?.account || null;
+    if (!profile && !d?.profile) {
+      return jsonResponse({ error: 'Cookie 无效或已过期' }, 400);
+    }
+    await saveNeteaseLogin(cookie, { profile, nickname: profile?.nickname || '', avatarUrl: profile?.avatarUrl || '' });
+    return jsonResponse({ ok: true, logged_in: true, profile });
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 502);
+  }
+});
+
+router.post('/api/netease/logout', async () => {
+  await songloft.storage.set(WY_COOKIE_KEY, '');
+  await songloft.storage.set(WY_PROFILE_KEY, '');
   return jsonResponse({ ok: true });
 });
 
@@ -392,8 +553,9 @@ const BROWSE_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const BROWSE_TIMEOUT_MS = 9000;
 
-async function browseFetch(url: string, opts?: { method?: string; body?: string; referer?: string }): Promise<any> {
+async function browseFetch(url: string, opts?: { method?: string; body?: string; referer?: string; headers?: Record<string, string> }): Promise<any> {
   const headers: Record<string, string> = { 'User-Agent': BROWSE_UA };
+  if (opts?.headers) Object.assign(headers, opts.headers);
   if (opts?.referer) headers['Referer'] = opts.referer;
   if (opts?.body) headers['Content-Type'] = 'application/json';
   const timeoutPromise = new Promise<never>((_, reject) =>
@@ -458,9 +620,11 @@ function mapWySong(t: any): any {
 }
 
 async function browseWyPlaylist(id: string): Promise<any> {
+  const wyCookie = await getNeteaseCookie();
+  const headers = wyCookie ? { Cookie: neteaseCookieHeader(wyCookie) } : undefined;
   const d = await browseFetch(
     'https://music.163.com/api/v6/playlist/detail?id=' + encodeURIComponent(id) + '&n=1000&s=0&t=0',
-    { referer: 'https://music.163.com/' },
+    { referer: 'https://music.163.com/', headers },
   );
   const r = (d as any).playlist || (d as any).result || {};
   const trackIds: string[] = (r.trackIds || []).map((x: any) => String(x.id)).filter(Boolean);
@@ -474,7 +638,7 @@ async function browseWyPlaylist(id: string): Promise<any> {
     const c = JSON.stringify(chunk.map((sid) => ({ id: Number(sid) })));
     const resp = await browseFetch(
       'https://music.163.com/api/v3/song/detail?c=' + encodeURIComponent(c),
-      { referer: 'https://music.163.com/' },
+      { referer: 'https://music.163.com/', headers },
     );
     for (const s of (resp as any).songs || []) details.push(s);
   }

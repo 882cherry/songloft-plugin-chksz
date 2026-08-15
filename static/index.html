@@ -234,6 +234,8 @@
         .batch-bar .btn-filled { width: 100%; }
         .batch-actions { display: flex; gap: 8px; }
         .batch-actions .btn-filled { flex: 1; width: auto; }
+        .login-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+        .login-actions .btn-outlined { flex: 1; min-width: 120px; }
         .btn-outlined {
             flex: 1; padding: 9px 14px; border: 1px solid var(--md-outline);
             border-radius: var(--md-radius-sm); background: var(--md-surface);
@@ -334,6 +336,13 @@
                 <option value="128k">标准 (128 kbps)</option>
             </select>
             <div class="dialog-hint">网易云: lossless / exhigh / standard;QQ·酷狗: flac / 320k / 128k</div>
+            <label>网易云登录</label>
+            <div class="dialog-hint" id="wyLoginStatus">未登录</div>
+            <div class="login-actions">
+                <button type="button" class="btn-outlined" id="wyQrLoginBtn">扫码登录</button>
+                <button type="button" class="btn-outlined" id="wyWebLoginBtn">网页登录 / Cookie</button>
+                <button type="button" class="btn-text" id="wyLogoutBtn" style="display:none">退出登录</button>
+            </div>
         </div>
         <div class="dialog-status" id="configStatus"></div>
         <div class="sheet-footer">
@@ -368,6 +377,41 @@
         <div class="sheet-footer">
             <button class="btn-text" id="importCancelBtn">取消</button>
             <button class="btn-filled" id="importConfirmBtn">开始导入</button>
+        </div>
+    </div>
+
+    <!-- ===== 网易云扫码登录面板 ===== -->
+    <div class="menu-backdrop" id="wyQrBackdrop" style="display:none"></div>
+    <div class="bottom-sheet" id="wyQrSheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">网易云扫码登录</div>
+        <div class="dialog-body" style="text-align:center">
+            <img id="wyQrImg" alt="网易云登录二维码" style="width:220px;height:220px;border-radius:12px;background:var(--md-surface-variant)">
+            <div class="dialog-hint" id="wyQrHint">获取二维码中…</div>
+            <a id="wyQrLink" href="#" target="_blank" rel="noopener" class="dialog-hint" style="display:none;color:var(--md-primary)">不方便扫码？点击打开网易云登录页</a>
+        </div>
+        <div class="dialog-status" id="wyQrStatus"></div>
+        <div class="sheet-footer">
+            <button class="btn-text" id="wyQrCancelBtn">取消</button>
+        </div>
+    </div>
+
+    <!-- ===== 网易云网页登录 / Cookie 导入面板 ===== -->
+    <div class="menu-backdrop" id="wyWebBackdrop" style="display:none"></div>
+    <div class="bottom-sheet" id="wyWebSheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">网易云网页登录</div>
+        <div class="dialog-body">
+            <div class="dialog-hint">1. 点击下方按钮打开网易云网页并登录。</div>
+            <button type="button" class="btn-outlined" id="wyOpenWebBtn" style="width:100%">打开 music.163.com 登录页</button>
+            <div class="dialog-hint" style="margin-top:10px">2. 登录后从浏览器 Cookie 中复制 MUSIC_U 的值，粘贴到下方。</div>
+            <label for="wyCookieInput">MUSIC_U / Cookie</label>
+            <textarea class="text-area" id="wyCookieInput" placeholder="粘贴 MUSIC_U 的值，或整段 Cookie"></textarea>
+        </div>
+        <div class="dialog-status" id="wyWebStatus"></div>
+        <div class="sheet-footer">
+            <button class="btn-text" id="wyWebCancelBtn">取消</button>
+            <button class="btn-filled" id="wyWebSaveBtn">验证并登录</button>
         </div>
     </div>
 

@@ -25,6 +25,7 @@
 | `POST /api/music/url` | 音源插件契约：`{source_data, fallback?}` → `{url}` |
 | `POST /api/search/topone` | miot 外部搜索源规范：`{keyword, hint?, quality?}` → `{code, data}` |
 | `POST /api/playlist/import` | 导入平台歌单/榜单：`{platform, id, name?}` 或 `{url, name?}`（支持网易云/QQ/酷狗分享链接） → 自动入库并创建 Songloft 歌单 |
+| `GET /api/netease/login/qr` 等 | 网易云扫码 / 网页 Cookie 登录；登录后网易云优先走官方播放接口 |
 | `GET/POST /api/settings` | 插件设置（api_key / quality） |
 
 ## 开发

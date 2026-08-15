@@ -53,7 +53,11 @@ npm run dev              # 开发模式
 | `POST /api/search/select` | 插件前端搜索：`{keyword, platforms:[wy,tx,kg]}`（平台多选） |
 | `GET /api/browse` | 首页模块：`?platform=wy|tx|kg` → 推荐歌单 / 排行榜 |
 | `GET /api/browse/playlist` | 歌单/榜单详情：`?platform=..&id=..` → 歌曲列表（带 source_data） |
-| `GET/POST /api/settings` | 插件设置：api_key / quality(128k/320k/flac) / platforms |
+| `GET/POST /api/settings` | 插件设置：api_key / quality(128k/320k/flac) / platforms / 网易云登录状态 |
+| `GET /api/netease/login/qr` | 获取网易云扫码登录 key 与登录 URL |
+| `GET /api/netease/login/qr/check` | 轮询扫码状态；803 成功后自动保存 MUSIC_U Cookie |
+| `POST /api/netease/login/cookie` | 网页登录 / Cookie 导入：验证 MUSIC_U 并保存 |
+| `POST /api/netease/logout` | 退出网易云登录 |
 | `POST /api/import` | 导入宿主曲库（去重键 `chksz_{platform}_{id/mid}`，返回歌曲 id） |
 | `POST /api/playlist/import` | 抓取源歌单/榜单 → 逐首入库（去重）→ 创建宿主歌单并批量加入；支持 `{platform, id, ...}` 或直接粘贴分享链接 `{url, name?}`（自动识别网易云/QQ/酷狗）；重复导入返回 `exists`，`overwrite:true` 时保留原歌单 id 覆盖歌曲 |
 | `POST /api/search/topone` | miot 外部搜索源规范（小爱音箱语音点歌） |
@@ -94,7 +98,7 @@ npm run dev              # 开发模式
 - 宿主 `SongloftPlugin` 桥（getAuthToken/apiGet/apiPost/...）在 iframe 加载后注入，前端初始化需容错（模块 try/catch 隔离，见 `app.js`）
 
 ### 7. 前端模块约定
-- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台 chips；`browse.js` 首页平台标签+歌单详情操作；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
+- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台 chips；`browse.js` 首页平台标签+歌单详情操作；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`neteaseLogin.js` 网易云扫码/Cookie 登录；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
 - 收藏歌单走宿主 API：`GET/POST /api/v1/playlists`（创建需 `{name, type:"normal"}`）、`POST /api/v1/playlists/{id}/songs`（`{song_ids:[..]}`，服务端去重）、`GET /api/v1/playlists/{id}/song-ids`
 - 未配置 API Key 时点击搜索 → 自动打开配置弹窗（`openConfig`）
 
