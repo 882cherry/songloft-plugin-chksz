@@ -7,6 +7,7 @@ import { initSearch } from './search.js'
 import { initConfig, checkKeyStatus } from './config.js'
 import { initLyrics } from './lyrics.js'
 import { initPlaylists } from './playlists.js'
+import { initBrowse } from './browse.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -34,6 +35,9 @@ function init() {
 
   // 收藏歌单
   safe(initPlaylists, 'playlists')
+
+  // 首页浏览(平台标签 + 推荐/排行榜模块)
+  safe(initBrowse, 'browse')
 
   // 首次加载静默检查 Key
   safe(checkKeyStatus, 'keyStatus')

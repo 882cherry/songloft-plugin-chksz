@@ -295,6 +295,224 @@ router.post('/api/import', async (req) => {
   }
 });
 
+// ===== 平台内容浏览(网页公开接口,无需 API Key,服务端代理避免 CORS) =====
+// 说明:网易云/QQ/酷狗均无官方开放 API,与常见开源播放器一致,这里对接各平台
+// 网页端公开接口获取 推荐歌单/排行榜 等资源,仅供个人学习研究使用。
+const BROWSE_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const BROWSE_TIMEOUT_MS = 9000;
+
+async function browseFetch(url: string, opts?: { method?: string; body?: string; referer?: string }): Promise<any> {
+  const headers: Record<string, string> = { 'User-Agent': BROWSE_UA };
+  if (opts?.referer) headers['Referer'] = opts.referer;
+  if (opts?.body) headers['Content-Type'] = 'application/json';
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('资源请求超时')), BROWSE_TIMEOUT_MS),
+  );
+  let resp: any;
+  try {
+    resp = await Promise.race([
+      fetch(url, { method: opts?.method || 'GET', headers, body: opts?.body }),
+      timeoutPromise,
+    ]);
+  } catch (e: any) {
+    throw new Error('网络请求失败: ' + (e?.message || e));
+  }
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  try {
+    return await resp.json();
+  } catch (e: any) {
+    throw new Error('响应不是 JSON: ' + (e?.message || e));
+  }
+}
+
+// ---- 网易云:推荐歌单 + 排行榜 ----
+async function browseWy(): Promise<any> {
+  const [pl, tl] = await Promise.all([
+    browseFetch('https://music.163.com/api/personalized/playlist?limit=9', { referer: 'https://music.163.com/' }),
+    browseFetch('https://music.163.com/api/toplist', { referer: 'https://music.163.com/' }),
+  ]);
+  const playlists = ((pl as any).result || []).map((p: any) => ({
+    id: String(p.id),
+    name: p.name || '',
+    cover: p.picUrl || '',
+    play_count: p.playCount || 0,
+    track_count: p.trackCount || 0,
+  }));
+  const toplists = ((tl as any).list || []).slice(0, 10).map((t: any) => ({
+    id: String(t.id),
+    name: t.name || '',
+    cover: t.coverImgUrl || '',
+    desc: t.description || '',
+  }));
+  return {
+    modules: [
+      { type: 'playlists', title: '猜你喜欢 · 推荐歌单', items: playlists },
+      { type: 'toplists', title: '排行榜', items: toplists },
+    ],
+  };
+}
+
+async function browseWyPlaylist(id: string): Promise<any> {
+  const d = await browseFetch(
+    'https://music.163.com/api/playlist/detail?id=' + encodeURIComponent(id),
+    { referer: 'https://music.163.com/' },
+  );
+  const r = (d as any).result || {};
+  const songs = (r.tracks || []).map((t: any) => ({
+    title: t.name || '',
+    artist: (t.artists || []).map((a: any) => a.name).join('/'),
+    album: t.album?.name || '',
+    duration: Math.round((Number(t.duration) || 0) / 1000),
+    cover_url: t.album?.picUrl || t.picUrl || undefined,
+    source_data: { platform: 'wy', id: String(t.id) },
+  }));
+  return { title: r.name || '', cover: r.coverImgUrl || '', songs };
+}
+
+// ---- QQ 音乐:推荐歌单 + 排行榜(musicu.fcg 聚合接口) ----
+async function browseTx(): Promise<any> {
+  const [pl, tl] = await Promise.all([
+    browseFetch(
+      'https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg?format=json&inCharset=utf-8&outCharset=utf-8&categoryId=10000000&sin=0&size=9',
+      { referer: 'https://y.qq.com/' },
+    ),
+    browseFetch('https://c.y.qq.com/v8/fcg-bin/fcg_myqq_toplist.fcg?format=json&outCharset=utf-8', {
+      referer: 'https://y.qq.com/',
+    }),
+  ]);
+  const playlists = (((pl as any).data || {}).list || []).map((p: any) => ({
+    id: String(p.dissid),
+    name: p.dissname || '',
+    cover: p.imgurl || '',
+    play_count: p.listen_count || 0,
+    track_count: p.song_count || 0,
+  }));
+  const toplists = (((tl as any).data || {}).topList || []).slice(0, 10).map((t: any) => ({
+    id: String(t.id),
+    name: t.topTitle || '',
+    cover: t.picUrl || '',
+    desc: '',
+  }));
+  return {
+    modules: [
+      { type: 'playlists', title: '猜你喜欢 · 推荐歌单', items: playlists },
+      { type: 'toplists', title: '排行榜', items: toplists },
+    ],
+  };
+}
+
+async function browseTxPlaylist(id: string): Promise<any> {
+  const req = {
+    comm: { ct: 24, cv: 0 },
+    req_1: {
+      module: 'music.srfDissInfo.aiDissInfo',
+      method: 'uniform_get_Dissinfo',
+      param: { disstid: Number(id) || 0, enc_host_uin: '', tag: 1, userinfo: 1, song_begin: 0, song_num: 100 },
+    },
+  };
+  const d = await browseFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+    method: 'POST',
+    body: JSON.stringify(req),
+    referer: 'https://y.qq.com/',
+  });
+  const data = (d as any).req_1?.data || {};
+  const info = data.dirinfo || {};
+  const songs = (data.songlist || [])
+    .map((s: any) => ({
+      title: s.name || s.title || '',
+      artist: (s.singer || []).map((x: any) => x.name).join('/'),
+      album: s.album?.name || s.albumname || '',
+      duration: Math.round(Number(s.interval) || 0),
+      source_data: { platform: 'tx', mid: String(s.mid || '') },
+    }))
+    .filter((s: any) => s.source_data.mid);
+  if (songs.length) return { title: info.title || '', cover: info.picurl || '', songs };
+  // 排行榜 id 不是歌单 id:回退到榜单接口(fcg_v8_toplist_cp)
+  const t = await browseFetch(
+    'https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?format=json&topid=' + encodeURIComponent(id) + '&page=1&num=50',
+    { referer: 'https://y.qq.com/' },
+  );
+  const topSongs = (((t as any).songlist || [])
+    .map((s: any) => {
+      const dt = s.data || s;
+      return {
+        title: dt.songname || dt.name || '',
+        artist: (dt.singer || []).map((x: any) => x.name).join('/'),
+        album: dt.albumname || (dt.album && dt.album.name) || '',
+        duration: Math.round(Number(dt.interval) || 0),
+        cover_url: dt.albummid
+          ? 'https://y.gtimg.cn/music/photo_new/T002R300x300M000' + dt.albummid + '.jpg'
+          : undefined,
+        source_data: { platform: 'tx', mid: String(dt.songmid || dt.mid || '') },
+      };
+    }))
+    .filter((s: any) => s.source_data.mid);
+  return {
+    title: String((t as any).topinfo?.ListName || info.title || ''),
+    cover: String((t as any).topinfo?.pic || info.picurl || '').replace('T003', 'T002'),
+    songs: topSongs,
+  };
+}
+
+// ---- 酷狗:排行榜(推荐歌单公开接口不可用,仅提供排行榜) ----
+async function browseKg(): Promise<any> {
+  const d = await browseFetch('http://mobilecdn.kugou.com/api/v3/rank/list?page=1&pagesize=30');
+  const toplists = (((d as any).data || {}).info || []).slice(0, 10).map((t: any) => ({
+    id: String(t.rankid),
+    name: t.rankname || '',
+    cover: String(t.imgurl || '').replace('{size}', '400'),
+    desc: t.intro || '',
+  }));
+  return { modules: [{ type: 'toplists', title: '排行榜', items: toplists }] };
+}
+
+async function browseKgPlaylist(id: string): Promise<any> {
+  const d = await browseFetch(
+    'http://m.kugou.com/rank/info/' + encodeURIComponent(id) + '?json=true&page=1&pagesize=50',
+  );
+  const info = (d as any).info || {};
+  const songs = (((d as any).songs || {}).list || [])
+    .map((s: any) => ({
+      title: s.songname || '',
+      artist: (s.authors || []).map((a: any) => a.author_name).join('/'),
+      album: s.album_name || s.albumname || '',
+      duration: Math.round(Number(s.duration) || 0),
+      cover_url: undefined,
+      source_data: { platform: 'kg', id: String(s.sqhash || s.hash || '') },
+    }))
+    .filter((s: any) => s.source_data.id);
+  return { title: info.rankname || '', cover: String(info.imgurl || '').replace('{size}', '400'), songs };
+}
+
+// 首页模块数据(猜你喜欢/推荐歌单 + 排行榜)
+router.get('/api/browse', async (req) => {
+  const q = parseQuery(req.query || '');
+  const platform = String(q.platform || 'wy');
+  try {
+    if (platform === 'tx') return jsonResponse(await browseTx());
+    if (platform === 'kg') return jsonResponse(await browseKg());
+    return jsonResponse(await browseWy());
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// 歌单/榜单详情歌曲列表
+router.get('/api/browse/playlist', async (req) => {
+  const q = parseQuery(req.query || '');
+  const platform = String(q.platform || 'wy');
+  const id = String(q.id || '');
+  if (!id) return jsonResponse({ error: 'id required' }, 400);
+  try {
+    if (platform === 'tx') return jsonResponse(await browseTxPlaylist(id));
+    if (platform === 'kg') return jsonResponse(await browseKgPlaylist(id));
+    return jsonResponse(await browseWyPlaylist(id));
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 502);
+  }
+});
+
 // 健康检查(宿主健康检查兜底)
 router.get('/api/health', async () => jsonResponse({ ok: true }));
 

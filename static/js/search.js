@@ -4,6 +4,7 @@ import { api, hasClientPlayer } from './api.js'
 import { setStatus, snackbar, platformName } from './util.js'
 import { playSongs, addToQueue, openPlayerScreen } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
+import { hideBrowse } from './browse.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -86,6 +87,7 @@ window.searchGo = function () {
   }
   btn.disabled = true
   setStatus(st, '搜索中(' + platformNames() + ')…')
+  hideBrowse()
   api('api/search/select', { method: 'POST', body: JSON.stringify({ keyword: kw, platforms: selectedPlatforms }) })
     .then((data) => {
       btn.disabled = false
