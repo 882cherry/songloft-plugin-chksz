@@ -17,7 +17,7 @@ ChKSz 是运行在 **Songloft 宿主**（QuickJS 沙箱）里的 JS 音源插件
 | `.github/workflows/release.yml` | 发布流水线（push 自动触发 / 手动 dispatch） |
 | `plugin.json` | 插件清单（版本 / 权限 / 更新地址 / entryHash / zipHash） |
 
-**插件数据流**：搜索/浏览（发现资源）→ `api/import` 导入宿主曲库 → **播放完全由宿主播放器承担**（宿主经插件 `/api/music/url` 静默解析真实链接）。
+**插件数据流**：搜索/浏览（发现资源）→ `api/import` 导入宿主曲库 / `api/playlist/import` 导入为宿主歌单 → **播放完全由宿主播放器承担**（宿主经插件 `/api/music/url` 静默解析真实链接）。
 
 ---
 
@@ -55,6 +55,7 @@ npm run dev              # 开发模式
 | `GET /api/browse/playlist` | 歌单/榜单详情：`?platform=..&id=..` → 歌曲列表（带 source_data） |
 | `GET/POST /api/settings` | 插件设置：api_key / quality(128k/320k/flac) / platforms |
 | `POST /api/import` | 导入宿主曲库（去重键 `chksz_{platform}_{id/mid}`，返回歌曲 id） |
+| `POST /api/playlist/import` | 抓取源歌单/榜单 → 逐首入库（去重）→ 创建宿主歌单并批量加入；`{platform, id, name?, description?, cover_url?}` |
 | `POST /api/search/topone` | miot 外部搜索源规范（小爱音箱语音点歌） |
 | `GET /api/health` | 健康检查 |
 
@@ -93,7 +94,7 @@ npm run dev              # 开发模式
 - 宿主 `SongloftPlugin` 桥（getAuthToken/apiGet/apiPost/...）在 iframe 加载后注入，前端初始化需容错（模块 try/catch 隔离，见 `app.js`）
 
 ### 7. 前端模块约定
-- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台 chips；`browse.js` 首页平台标签+模块；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
+- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台 chips；`browse.js` 首页平台标签+歌单详情操作；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
 - 收藏歌单走宿主 API：`GET/POST /api/v1/playlists`（创建需 `{name, type:"normal"}`）、`POST /api/v1/playlists/{id}/songs`（`{song_ids:[..]}`，服务端去重）、`GET /api/v1/playlists/{id}/song-ids`
 - 未配置 API Key 时点击搜索 → 自动打开配置弹窗（`openConfig`）
 

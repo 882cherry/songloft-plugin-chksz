@@ -4,6 +4,7 @@ import { api } from './api.js'
 import { snackbar, platformName, fmtTime } from './util.js'
 import { playSongs } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
+import { openImportPlaylist } from './importPlaylist.js'
 
 const TABS = [
   { code: 'wy', name: '网易云' },
@@ -169,13 +170,26 @@ function renderPlaylist(data, item) {
   head.querySelector('.browse-detail-title').textContent = data.title || item.name
   head.querySelector('.browse-detail-sub').textContent = (data.songs || []).length + ' 首'
   box.appendChild(head)
-  // 全部导入曲库按钮(导入后可在宿主界面搜索/播放,插件静默提供解析)
+  // 歌单操作:主操作「导入为 Songloft 歌单」,次操作「仅导入曲库」
   const allSongs = data.songs || []
   if (allSongs.length) {
     const bar = document.createElement('div')
     bar.className = 'batch-bar'
-    bar.innerHTML = '<button type="button" class="btn-filled" id="batchImportBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">download</span> 全部导入曲库(' + allSongs.length + ')</button>'
+    bar.innerHTML =
+      '<div class="batch-actions">' +
+      '<button type="button" class="btn-filled" id="importPlaylistBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">playlist_add</span> 导入为 Songloft 歌单</button>' +
+      '<button type="button" class="btn-outlined" id="batchImportBtn">仅导入曲库(' + allSongs.length + ')</button>' +
+      '</div>'
     box.appendChild(bar)
+    bar.querySelector('#importPlaylistBtn').addEventListener('click', () => {
+      openImportPlaylist({
+        platform: currentTab,
+        id: item.id,
+        title: data.title || item.name,
+        cover: data.cover,
+        songCount: allSongs.length,
+      })
+    })
     bar.querySelector('#batchImportBtn').addEventListener('click', () => {
       const btn = bar.querySelector('#batchImportBtn')
       btn.disabled = true

@@ -24,6 +24,7 @@
 | `POST /api/search` | 音源插件契约：`{keyword, page?, page_size?}` → `{results: [{title, artist, album, duration, cover_url, source_data}]}` |
 | `POST /api/music/url` | 音源插件契约：`{source_data, fallback?}` → `{url}` |
 | `POST /api/search/topone` | miot 外部搜索源规范：`{keyword, hint?, quality?}` → `{code, data}` |
+| `POST /api/playlist/import` | 导入平台歌单/榜单：`{platform, id, name?}` → 自动入库并创建 Songloft 歌单 |
 | `GET/POST /api/settings` | 插件设置（api_key / quality） |
 
 ## 开发

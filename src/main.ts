@@ -333,7 +333,42 @@ router.post('/api/settings', async (req) => {
   return jsonResponse({ ok: true });
 });
 
-// 导入搜索结果到曲库(remote 歌曲,自动关联本插件,播放时宿主经 /api/music/url 解析)。
+// ===== 歌曲入库(remote 歌曲,自动关联本插件,播放时宿主经 /api/music/url 解析) =====
+function buildCreateSongInput(item: any) {
+  return {
+    title: String(item.title || '').trim(),
+    artist: item.artist || '',
+    album: item.album || '',
+    coverUrl: item.cover_url || undefined,
+    duration: item.duration || 0,
+    sourceData: JSON.stringify(item.source_data),
+    dedupKey: `chksz_${item.source_data.platform}_${item.source_data.id || item.source_data.mid}`,
+  };
+}
+
+async function importSongToLibrary(item: any): Promise<number> {
+  const created = await songloft.songs.create([buildCreateSongInput(item)]);
+  const s = created && created[0];
+  if (!s || !s.id) throw new Error('创建歌曲失败,宿主未返回 id');
+  return s.id;
+}
+
+// 批量入库:逐首导入(保留 source_data,宿主按 dedup_key 去重,重复导入返回原 id)
+async function importSongsToLibrary(songs: any[]): Promise<{ songIds: number[]; failed: number; errors: string[] }> {
+  const songIds: number[] = [];
+  const errors: string[] = [];
+  for (let i = 0; i < songs.length; i++) {
+    try {
+      songIds.push(await importSongToLibrary(songs[i]));
+    } catch (e: any) {
+      errors.push(`[${i + 1}] ${e?.message || e}`);
+      songloft.log.warn(`[chksz] 歌单歌曲入库失败 ${i + 1}/${songs.length}: ${e?.message || e}`);
+    }
+  }
+  return { songIds, failed: errors.length, errors };
+}
+
+// 导入搜索结果到曲库。
 // 供插件前端「搜索→播放」使用;也可被其他插件/脚本调用。
 router.post('/api/import', async (req) => {
   const body = JSON.parse((req.body as string) || '{}');
@@ -342,18 +377,8 @@ router.post('/api/import', async (req) => {
     return jsonResponse({ error: 'invalid song: title and source_data required' }, 400);
   }
   try {
-    const created = await songloft.songs.create([{
-      title: item.title,
-      artist: item.artist || '',
-      album: item.album || '',
-      coverUrl: item.cover_url || undefined,
-      duration: item.duration || 0,
-      sourceData: JSON.stringify(item.source_data),
-      dedupKey: `chksz_${item.source_data.platform}_${item.source_data.id || item.source_data.mid}`,
-    }]);
-    const s = created && created[0];
-    if (!s || !s.id) throw new Error('创建歌曲失败,宿主未返回 id');
-    return jsonResponse({ ok: true, id: s.id, title: s.title });
+    const id = await importSongToLibrary(item);
+    return jsonResponse({ ok: true, id, title: item.title });
   } catch (e: any) {
     songloft.log.error(`[chksz] 导入歌曲失败: ${e?.message || e}`);
     return jsonResponse({ error: String(e?.message || e) }, 500);
@@ -575,6 +600,61 @@ router.get('/api/browse/playlist', async (req) => {
     return jsonResponse(await browseWyPlaylist(id));
   } catch (e: any) {
     return jsonResponse({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// ===== 歌单导入到宿主 =====
+async function fetchPlaylistDetail(platform: string, id: string): Promise<{ title: string; cover: string; songs: any[] }> {
+  if (platform === 'tx') return await browseTxPlaylist(id);
+  if (platform === 'kg') return await browseKgPlaylist(id);
+  return await browseWyPlaylist(id);
+}
+
+function platformLabel(platform: string): string {
+  if (platform === 'tx') return 'QQ音乐';
+  if (platform === 'kg') return '酷狗';
+  return '网易云';
+}
+
+// 导入歌单:抓取源歌单/榜单歌曲 → 逐首入库(去重)→ 创建宿主歌单 → 批量加入
+router.post('/api/playlist/import', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const platform = String(body.platform || '');
+  const id = String(body.id || '');
+  if (!ALL_PLATFORMS.includes(platform)) return jsonResponse({ error: 'platform must be wy/tx/kg' }, 400);
+  if (!id) return jsonResponse({ error: 'id required' }, 400);
+
+  try {
+    const detail = await fetchPlaylistDetail(platform, id);
+    const songs = (detail.songs || []).filter((s) => s && s.title && s.source_data);
+    if (!songs.length) return jsonResponse({ error: 'playlist is empty or not playable' }, 502);
+
+    const name = String(body.name || detail.title || '').trim() || `${platformLabel(platform)}歌单 ${id}`;
+    const imported = await importSongsToLibrary(songs);
+    if (!imported.songIds.length) {
+      return jsonResponse({ error: `歌曲入库全部失败: ${imported.errors[0] || 'unknown'}` }, 500);
+    }
+
+    const playlist = await songloft.playlists.create({
+      name,
+      type: 'normal',
+      description: String(body.description || `从 ${platformLabel(platform)} 导入 · ${name}`).slice(0, 200),
+      coverUrl: body.cover_url || detail.cover || undefined,
+    });
+    const added = await songloft.playlists.addSongs(playlist.id, imported.songIds);
+
+    songloft.log.info(`[chksz] 歌单导入完成: ${name} source=${platform}/${id} songs=${added.added + added.skipped} failed=${imported.failed}`);
+    return jsonResponse({
+      ok: true,
+      playlist: { id: playlist.id, name: playlist.name },
+      imported: imported.songIds.length,
+      failed: imported.failed,
+      added: added.added,
+      skipped: added.skipped,
+    });
+  } catch (e: any) {
+    songloft.log.error(`[chksz] 导入歌单失败: ${e?.message || e}`);
+    return jsonResponse({ error: String(e?.message || e) }, 500);
   }
 });
 

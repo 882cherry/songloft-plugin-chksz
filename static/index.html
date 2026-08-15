@@ -218,6 +218,15 @@
         /* 批量导入曲库按钮 */
         .batch-bar { padding: 4px 0 10px; }
         .batch-bar .btn-filled { width: 100%; }
+        .batch-actions { display: flex; gap: 8px; }
+        .batch-actions .btn-filled { flex: 1; width: auto; }
+        .btn-outlined {
+            flex: 1; padding: 9px 14px; border: 1px solid var(--md-outline);
+            border-radius: var(--md-radius-sm); background: var(--md-surface);
+            color: var(--md-primary); font-size: 14px; font-weight: 600;
+            cursor: pointer; white-space: nowrap;
+        }
+        .btn-outlined:disabled { opacity: .5; cursor: not-allowed; }
 
         .browse-rank-row {
             display: flex; align-items: center; gap: 12px; padding: 7px 4px;
@@ -327,6 +336,24 @@
         <div class="sheet-body" id="playlistList"></div>
         <div class="sheet-footer">
             <button class="btn-text" id="playlistCancelBtn">取消</button>
+        </div>
+    </div>
+
+    <!-- ===== 导入歌单到宿主面板 ===== -->
+    <div class="menu-backdrop" id="importBackdrop" style="display:none"></div>
+    <div class="bottom-sheet" id="importSheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">导入歌单到 Songloft</div>
+        <div class="dialog-body">
+            <div class="dialog-hint" id="importSourceInfo"></div>
+            <label for="importPlaylistName">歌单名称</label>
+            <input type="text" class="text-field" id="importPlaylistName" placeholder="输入歌单名称" maxlength="60">
+            <div class="dialog-hint">歌曲会先导入曲库（已存在自动去重），然后创建同名歌单。</div>
+        </div>
+        <div class="dialog-status" id="importStatus"></div>
+        <div class="sheet-footer">
+            <button class="btn-text" id="importCancelBtn">取消</button>
+            <button class="btn-filled" id="importConfirmBtn">开始导入</button>
         </div>
     </div>
 
