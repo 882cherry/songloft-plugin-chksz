@@ -752,6 +752,42 @@ function platformLabel(platform: string): string {
   return '网易云';
 }
 
+// ===== 导入映射:记录「平台歌单」→「宿主歌单」,用于重复导入检测/覆盖 =====
+const IMPORT_MAP_KEY = 'playlist_import_map';
+
+async function getImportMap(): Promise<Record<string, number>> {
+  try {
+    const raw = (await songloft.storage.get(IMPORT_MAP_KEY)) as string;
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') return obj as Record<string, number>;
+    }
+  } catch {
+    /* 损坏则重建 */
+  }
+  return {};
+}
+
+async function saveImportMap(map: Record<string, number>): Promise<void> {
+  await songloft.storage.set(IMPORT_MAP_KEY, JSON.stringify(map));
+}
+
+async function replacePlaylistSongs(playlistId: number, songIds: number[]): Promise<AddSongsResult> {
+  let removed = 0;
+  try {
+    const oldSongs = await songloft.playlists.getSongs(playlistId);
+    const oldIds = (oldSongs || []).map((s) => s.id).filter((n) => n != null);
+    if (oldIds.length) {
+      await songloft.playlists.removeSongs(playlistId, oldIds);
+      removed = oldIds.length;
+    }
+  } catch (e: any) {
+    songloft.log.warn(`[chksz] 清空旧歌单失败(继续追加导入): ${e?.message || e}`);
+  }
+  const added = await songloft.playlists.addSongs(playlistId, songIds);
+  return { added: added.added, skipped: added.skipped + removed };
+}
+
 // 导入歌单:抓取源歌单/榜单歌曲 → 逐首入库(去重)→ 创建宿主歌单 → 批量加入
 router.post('/api/playlist/import', async (req) => {
   const body = JSON.parse((req.body as string) || '{}');
@@ -770,27 +806,72 @@ router.post('/api/playlist/import', async (req) => {
   if (!id) return jsonResponse({ error: 'id required' }, 400);
 
   try {
+    const overwrite = body.overwrite === true;
+    const sourceKey = platform + ':' + id;
+    const importMap = await getImportMap();
+    const existingId = Number(importMap[sourceKey]) || 0;
+
+    // 重复导入且未显式要求覆盖:先返回 exists,由前端询问用户
+    if (existingId && !overwrite) {
+      const existing = await songloft.playlists.getById(existingId);
+      if (existing) {
+        return jsonResponse({
+          exists: true,
+          message: '该歌单已经导入过,是否覆盖原歌单中的歌曲?',
+          playlist: { id: existing.id, name: existing.name },
+          source: { platform, id },
+        });
+      }
+    }
+
     const detail = await fetchPlaylistDetail(platform, id);
     const songs = (detail.songs || []).filter((s) => s && s.title && s.source_data);
     if (!songs.length) return jsonResponse({ error: 'playlist is empty or not playable' }, 502);
 
     const name = String(body.name || detail.title || '').trim() || `${platformLabel(platform)}歌单 ${id}`;
+    const description = String(body.description || `从 ${platformLabel(platform)} 导入 · ${name}`).slice(0, 200);
+    const coverUrl = body.cover_url || detail.cover || undefined;
     const imported = await importSongsToLibrary(songs);
     if (!imported.songIds.length) {
       return jsonResponse({ error: `歌曲入库全部失败: ${imported.errors[0] || 'unknown'}` }, 500);
     }
 
-    const playlist = await songloft.playlists.create({
+    let playlist: any = null;
+    let overwritten = false;
+    if (existingId) {
+      const existing = await songloft.playlists.getById(existingId);
+      if (existing) {
+        await songloft.playlists.update(existing.id, { name, description, coverUrl });
+        const added = await replacePlaylistSongs(existing.id, imported.songIds);
+        playlist = existing;
+        overwritten = true;
+        songloft.log.info(`[chksz] 歌单覆盖导入完成: ${name} source=${sourceKey} songs=${added.added} failed=${imported.failed}`);
+        return jsonResponse({
+          ok: true,
+          overwritten: true,
+          playlist: { id: playlist.id, name: playlist.name },
+          imported: imported.songIds.length,
+          failed: imported.failed,
+          added: added.added,
+          skipped: added.skipped,
+        });
+      }
+    }
+
+    playlist = await songloft.playlists.create({
       name,
       type: 'normal',
-      description: String(body.description || `从 ${platformLabel(platform)} 导入 · ${name}`).slice(0, 200),
-      coverUrl: body.cover_url || detail.cover || undefined,
+      description,
+      coverUrl,
     });
     const added = await songloft.playlists.addSongs(playlist.id, imported.songIds);
+    importMap[sourceKey] = playlist.id;
+    await saveImportMap(importMap);
 
-    songloft.log.info(`[chksz] 歌单导入完成: ${name} source=${platform}/${id} songs=${added.added + added.skipped} failed=${imported.failed}`);
+    songloft.log.info(`[chksz] 歌单导入完成: ${name} source=${sourceKey} songs=${added.added + added.skipped} failed=${imported.failed}`);
     return jsonResponse({
       ok: true,
+      overwritten,
       playlist: { id: playlist.id, name: playlist.name },
       imported: imported.songIds.length,
       failed: imported.failed,
