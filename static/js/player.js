@@ -58,17 +58,17 @@ function getPlayer() {
 
 function hasPlayer() { return !!getPlayer() }
 
-// ===== 状态订阅 =====
+// ===== 状态订阅与同步 =====
 let autoOpened = false // 仅首次自动展开播放界面
+let pendingPlay = false // setQueue 后等待真实播放的窗口期
+let pendingStart = 0 // pendingPlay 开始时刻
 
 function bindPlayerEvents() {
   if (unsub) return
   if (player && typeof player.onStateChange === 'function') {
     unsub = player.onStateChange((s) => {
       try {
-        Object.assign(state, s)
-        render()
-        persist()
+        applyHostState(s)
       } catch (e) {
         console.error('[chksz] state render failed:', e)
       }
@@ -77,9 +77,7 @@ function bindPlayerEvents() {
   if (player && typeof player.getState === 'function') {
     player.getState().then((s) => {
       if (!s) return
-      Object.assign(state, s)
-      render()
-      persist()
+      applyHostState(s)
       // 需求:进入页面时若已有播放列表(当前歌曲),直接显示播放界面(仅首次)
       if (state.current_song && !autoOpened) {
         autoOpened = true
@@ -87,6 +85,71 @@ function bindPlayerEvents() {
       }
     }).catch(() => {})
   }
+}
+
+// 采纳宿主状态:
+// - pendingPlay 窗口期(setQueue 后、真正开始播放前):宿主可能残留上一首的
+//   时长/进度(实测会返回旧歌 duration + 旧 current_time),只更新歌曲信息,
+//   进度保持加载态(0:00 / --:--),等 is_playing 且 duration>0 再采纳完整状态
+// - 切歌(歌曲 id 变化)且未播放时:同样只更新歌曲信息,避免短暂显示旧时长
+// - 其余情况:按字段差异决定是否重渲染
+function applyHostState(s) {
+  if (!s) return
+  if (pendingPlay) {
+    // 等宿主音频流切换稳定(至少 2 秒)再采纳完整状态,避免采纳
+    // setQueue 后旧流仍在播放的残留进度(current_time 是上一首的位置)
+    if (s.is_playing && s.duration > 0 && Date.now() - pendingStart >= 2000) {
+      pendingPlay = false
+      Object.assign(state, s)
+      render()
+      persist()
+      return
+    }
+    // 窗口期内只更新歌曲信息与真实时长,进度保持 0(加载态)
+    if (s.current_song && (!state.current_song || state.current_song.id !== s.current_song.id)) {
+      state.current_song = s.current_song
+      state.queue = s.queue || state.queue
+      state.current_index = s.current_index
+      state.is_playing = false
+      state.current_time = 0
+      state.duration = s.duration || 0
+      render()
+      persist()
+    }
+    return
+  }
+  const songChanged = !!s.current_song && !!state.current_song && s.current_song.id !== state.current_song.id
+  if (songChanged && !s.is_playing) {
+    // 切歌未播放:更新歌曲信息,进度重置为加载态
+    state.current_song = s.current_song
+    state.queue = s.queue || state.queue
+    state.current_index = s.current_index
+    state.is_playing = false
+    state.current_time = 0
+    state.duration = 0
+    render()
+    persist()
+    return
+  }
+  const changed =
+    s.duration !== state.duration ||
+    s.is_playing !== state.is_playing ||
+    s.current_index !== state.current_index ||
+    Math.abs((s.current_time || 0) - (state.current_time || 0)) > 1.5 ||
+    !!s.current_song !== !!state.current_song ||
+    songChanged
+  if (changed) {
+    Object.assign(state, s)
+    render()
+    persist()
+  }
+}
+
+// 定时拉取宿主状态兜底(宿主 onStateChange 推送不可靠:setQueue 后/播放中
+// 经常不推送,导致进度条/时长停留在旧值,必须主动轮询校正)
+function syncState() {
+  if (!player || typeof player.getState !== 'function') return
+  player.getState().then((s) => applyHostState(s)).catch(() => {})
 }
 
 // ===== 本地兜底:宿主状态不可用(加载竞态)时用上次快照渲染 =====
@@ -286,8 +349,24 @@ function renderQueue() {
 /** 播放一组歌(替换队列从第 0 首开始),并展开全屏播放界面 */
 export function playSongs(songs, startIndex = 0) {
   if (!hasPlayer()) return Promise.reject(new Error('宿主播放器不可用'))
+  // 进入加载窗口:清掉上一首残留进度,避免新歌进度条显示旧值
+  pendingPlay = true
+  pendingStart = Date.now()
+  state.current_time = 0
+  state.duration = 0
+  state.is_playing = false
+  render()
   return player.setQueue(songs.map((s) => s.id), { startIndex }).then(() => {
     openPlayerScreen()
+    // setQueue 后宿主不一定推送状态,主动拉取校正
+    syncState()
+    // 兜底:6 秒后若仍未开始播放,退出加载窗口采纳当前状态
+    setTimeout(() => {
+      if (pendingPlay) {
+        pendingPlay = false
+        syncState()
+      }
+    }, 6000)
   })
 }
 
@@ -402,6 +481,9 @@ export function initPlayer() {
       renderProgress()
     }
   }, 500)
+
+  // 宿主状态兜底同步:每 2 秒校正进度/时长/切歌(宿主推送不可靠时的保险)
+  setInterval(syncState, 2000)
 
   // 宿主播放器可能延迟注入:轮询等待
   let tries = 0
