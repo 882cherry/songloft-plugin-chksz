@@ -1,0 +1,6 @@
+{
+  "name": "ChKSz 音源插件源",
+  "plugins": [
+    "https://raw.githubusercontent.com/882cherry/songloft-plugin-chksz/main/plugin.json"
+  ]
+}
