@@ -359,6 +359,91 @@
             opacity: 0; transition: opacity .2s ease, transform .2s ease; pointer-events: none; max-width: 88vw;
         }
         .snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        /* ===== 毛玻璃风格(播放界面 / 迷你条 / 进度条) =====
+           覆盖层采用深色渐变 + 封面模糊背景,内容放毛玻璃卡片;
+           不支持 backdrop-filter 的环境(如 WebF)自动降级为半透明深色底 */
+        .player-overlay {
+            background: linear-gradient(160deg, #23254d 0%, #312a5e 42%, #1b1b33 100%);
+            color: #fff;
+        }
+        .player-overlay .bg-blur { opacity: .55; }
+        .player-overlay .bg-overlay {
+            background: linear-gradient(180deg, rgba(8,8,24,.50), rgba(8,8,24,.22) 35%, rgba(8,8,24,.62));
+        }
+        .player-overlay .player-topbar { color: #fff; }
+        .player-overlay .btn-icon { color: rgba(255,255,255,.92); }
+        .player-overlay .btn-icon:active { background: rgba(255,255,255,.14); }
+        .player-top-title { color: rgba(255,255,255,.95); }
+
+        .glass-card {
+            background: rgba(255,255,255,.10);
+            -webkit-backdrop-filter: blur(28px) saturate(1.5);
+            backdrop-filter: blur(28px) saturate(1.5);
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 22px;
+            box-shadow: 0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.12);
+        }
+        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+            .glass-card { background: rgba(30,30,58,.88); }
+        }
+        .player-card {
+            width: min(92vw, 420px); flex: 0 0 auto;
+            padding: 18px 20px 14px; margin: 2px 0 8px;
+        }
+
+        /* 播放界面文字(深色底) */
+        .player-page .song-title { color: #fff; font-size: 20px; }
+        .player-page .song-artist { color: rgba(255,255,255,.72); }
+        .song-status { background: rgba(255,255,255,.16); color: #fff; }
+        .cover-wrap { border: 1px solid rgba(255,255,255,.12); }
+
+        /* 进度条:加粗 + 渐变发光 + 常显圆点,高对比可察觉 */
+        .progress { gap: 10px; padding: 8px 2px; }
+        .progress-time { font-size: 12px; color: rgba(255,255,255,.85); font-weight: 600; }
+        .progress-rail { height: 6px; border-radius: 3px; background: rgba(255,255,255,.22); }
+        .progress-fill {
+            height: 6px; border-radius: 3px;
+            background: linear-gradient(90deg, #6f7bff, #a5b4ff);
+            box-shadow: 0 0 10px rgba(124,140,255,.75);
+        }
+        .progress-thumb {
+            width: 16px; height: 16px;
+            background: #fff; border: 3px solid #6f7bff;
+            box-shadow: 0 0 10px rgba(124,140,255,.9);
+            display: block; /* 常显,便于察觉 */
+        }
+
+        /* 控制区 */
+        .controls .btn-icon { color: rgba(255,255,255,.92); }
+        .play-btn {
+            background: linear-gradient(135deg, #7c89ff, #5258e8) !important;
+            color: #fff !important;
+            box-shadow: 0 8px 26px rgba(98,108,255,.55), inset 0 1px 0 rgba(255,255,255,.25);
+        }
+        .player-extra .btn-text { color: rgba(255,255,255,.88); }
+
+        /* 歌词页(深色底) */
+        .lyric-page .lyric-line { color: rgba(255,255,255,.55); }
+        .lyric-page .lyric-line.active { color: #fff; }
+        .lyric-page .lyric-empty { color: rgba(255,255,255,.45); }
+        .lyric-back { color: rgba(255,255,255,.9); }
+
+        /* 迷你播放条:浅色毛玻璃(亮/暗主题自适应) */
+        .mini-player {
+            background: rgba(255,255,255,.72);
+            -webkit-backdrop-filter: blur(20px) saturate(1.4);
+            backdrop-filter: blur(20px) saturate(1.4);
+            border-top: 1px solid rgba(255,255,255,.5);
+            box-shadow: 0 -4px 20px rgba(0,0,0,.10);
+        }
+        [data-theme="dark"] .mini-player {
+            background: rgba(35,35,45,.78);
+            border-top: 1px solid rgba(255,255,255,.08);
+        }
+        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+            .mini-player { background: var(--md-surface); border-top: 1px solid var(--md-outline-variant); }
+        }
     </style>
     <script>
       (function () {
@@ -409,6 +494,7 @@
                     <img id="cover" alt="" referrerpolicy="no-referrer" style="display:none">
                     <div class="cover-ph" id="coverPh"><span class="material-symbols-outlined">music_note</span></div>
                 </div>
+                <div class="glass-card player-card">
                 <div class="song-info">
                     <div class="song-title" id="songTitle">未在播放</div>
                     <div class="song-artist" id="songArtist"></div>
@@ -436,6 +522,7 @@
                     <button class="btn-text" id="favBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">favorite_border</span> 收藏</button>
                     <button class="btn-text" id="queueBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">queue_music</span> 队列</button>
                     <button class="btn-text" id="lyricToggleBtn"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">lyrics</span> 歌词</button>
+                </div>
                 </div>
             </div>
             <!-- 页 2:歌词(点击页面空白处/返回按钮切回播放) -->
