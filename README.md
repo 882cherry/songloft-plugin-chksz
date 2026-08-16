@@ -13,6 +13,16 @@
 
 ## 安装
 
+### 订阅源地址（推荐）
+
+Songloft 的「JS 插件」页面支持添加订阅源，填入以下地址后即可一键安装/更新本插件：
+
+```
+https://raw.githubusercontent.com/882cherry/songloft-plugin-chksz/main/registry.json
+```
+
+手动安装：
+
 1. 下载最新 [Release](https://github.com/882cherry/songloft-plugin-chksz/releases/latest) 中的 `chksz.jsplugin.zip`
 2. Songloft 后台 →「JS 插件」→ 安装 → 上传 zip
 3. 打开插件 → 设置 → 填入 API Key（可选调整默认音质）
