@@ -1929,6 +1929,58 @@ router.post('/api/search/topone', async (req) => {
   }
 });
 
+// ===== miot 外部搜索源注册(支持 miot 后装/重装后自动补注册) =====
+let miotRegistered = false;
+let miotRegisterTimer: any = null;
+let lastMiotRegisterAttempt = 0;
+
+async function registerMiot(force = false): Promise<boolean> {
+  if (miotRegistered) return true;
+  if (!force && Date.now() - lastMiotRegisterAttempt < 15000) return false;
+  lastMiotRegisterAttempt = Date.now();
+  try {
+    if (!songloft.comm || typeof songloft.comm.call !== 'function') return false;
+    await songloft.comm.call('miot', 'register-search-provider', {
+      name: 'ChKSz',
+      searchPath: '/api/search/topone',
+    });
+    miotRegistered = true;
+    songloft.log.info('[chksz] 已向 miot 注册搜索源候选');
+    if (miotRegisterTimer) {
+      clearInterval(miotRegisterTimer);
+      miotRegisterTimer = null;
+    }
+    return true;
+  } catch (e: any) {
+    if (force) songloft.log.warn(`[chksz] 向 miot 注册搜索源失败: ${e?.message || e}`);
+    return false;
+  }
+}
+
+function startMiotRegistration() {
+  setTimeout(async () => {
+    if (await registerMiot(true)) return;
+    // miot 可能后安装/后重启,持续重试直到成功;插件被卸载时 onDeinit 会清除定时器
+    miotRegisterTimer = setInterval(() => {
+      if (miotRegistered && miotRegisterTimer) {
+        clearInterval(miotRegisterTimer);
+        miotRegisterTimer = null;
+        return;
+      }
+      registerMiot(false);
+    }, 20000);
+  }, 2000);
+}
+
+router.post('/api/miot/register', async () => {
+  const ok = await registerMiot(true);
+  return jsonResponse({ ok, registered: ok });
+});
+
+router.get('/api/miot/status', async () => {
+  return jsonResponse({ registered: miotRegistered });
+});
+
 // ===== 生命周期 =====
 async function onInit(): Promise<void> {
   songloft.log.info('[chksz] ChKSz 音源插件已加载');
@@ -1944,26 +1996,16 @@ async function onInit(): Promise<void> {
     songloft.log.warn(`[chksz] 注册歌词提供者失败: ${e?.message || e}`);
   }
 
-  // 向 miot 注册为外部搜索源候选(延迟 + 重试,规避启动竞态;miot 未安装时静默跳过)
-  setTimeout(async () => {
-    for (let i = 0; i < 5; i++) {
-      try {
-        if (!songloft.comm || typeof songloft.comm.call !== 'function') return;
-        await songloft.comm.call('miot', 'register-search-provider', {
-          name: 'ChKSz',
-          searchPath: '/api/search/topone',
-        });
-        songloft.log.info('[chksz] 已向 miot 注册搜索源候选');
-        return;
-      } catch (e) {
-        if (i < 4) await new Promise((r) => setTimeout(r, 3000));
-      }
-    }
-    songloft.log.info('[chksz] miot 未安装/未就绪,放弃注册搜索源');
-  }, 2000);
+  // 向 miot 注册为外部搜索源候选;miot 后装/重装也能通过周期重试和 HTTP 请求补注册
+  startMiotRegistration();
 }
 
 async function onDeinit(): Promise<void> {
+  if (miotRegisterTimer) {
+    clearInterval(miotRegisterTimer);
+    miotRegisterTimer = null;
+  }
+  miotRegistered = false;
   try {
     if (songloft.lyrics && typeof songloft.lyrics.unregisterProvider === 'function') {
       songloft.lyrics.unregisterProvider();
@@ -1975,6 +2017,7 @@ async function onDeinit(): Promise<void> {
 }
 
 async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
+  try { await registerMiot(false); } catch { /* 不阻塞请求 */ }
   return await router.handle(req);
 }
 

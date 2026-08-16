@@ -63,6 +63,8 @@ npm run dev              # 开发模式
 | `POST /api/import` | 导入宿主曲库（去重键 `chksz_{platform}_{id/mid}`，返回歌曲 id） |
 | `POST /api/playlist/import` | 抓取源歌单/榜单 → 逐首入库（去重）→ 创建宿主歌单并批量加入；支持 `{platform, id, ...}` 或直接粘贴分享链接 `{url, name?}`（自动识别网易云/QQ/酷狗）；重复导入返回 `exists`，`overwrite:true` 时保留原歌单 id 覆盖歌曲 |
 | `POST /api/search/topone` | miot 外部搜索源规范（小爱音箱语音点歌） |
+| `POST /api/miot/register` | 手动触发向 miot 注册为外部搜索源候选（miot 后装/重装后补注册用） |
+| `GET /api/miot/status` | 查询 ChKSz 是否已向 miot 注册 |
 | `GET /api/health` | 健康检查 |
 
 **平台标识**：`wy`=网易云 `tx`=QQ `kg`=酷狗（source_data.platform）。
