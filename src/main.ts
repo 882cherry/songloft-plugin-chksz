@@ -939,7 +939,14 @@ type LyricResult = {
 function isValidLyric(text: string): boolean {
   const t = String(text || '').trim();
   if (!t) return false;
-  const contentLines = t.split('\n').filter((l) => l.trim() && !/^\[\w+:/.test(l.trim()) && !/^\[(ar|ti|al|by|offset|total|hash|sign|qq|id):/i.test(l.trim()));
+  // 只过滤元信息标签(如 [ar:]/[ti:]/[id:$...]),不要过滤 [00:12.34] 这类时间轴行
+  const contentLines = t.split('\n').filter((l) => {
+    const line = l.trim();
+    if (!line) return false;
+    if (/^\[(ar|ti|al|by|offset|total|hash|sign|qq|id):/i.test(line)) return false;
+    if (/^\[id:\$/.test(line)) return false;
+    return true;
+  });
   return contentLines.length >= 2;
 }
 
