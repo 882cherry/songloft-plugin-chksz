@@ -84,6 +84,7 @@ npm run dev              # 开发模式
 ### 4. QuickJS 环境限制
 - 无 DOM；TS 编译为字节码 `main.jsc`（builder 自动处理）
 - `fetch` 可用但**无 AbortController**，超时用 `Promise.race`（`chkszGet` / `browseFetch` 已有模式，超时 6s/9s）
+- `fetch` 响应头里的 `set-cookie` 可能被合并成逗号分隔长串；不要整串当 Cookie 回传（网易云会判定未登录）。`neteaseCookieHeader` 只提取 `MUSIC_U` / `__csrf` 后发送
 - 外部接口统一走服务端代理（插件后端 fetch，无 CORS 问题），前端只调插件自身路由
 
 ### 5. 平台内容接口是网页逆向接口，随时可能变化

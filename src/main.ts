@@ -119,9 +119,38 @@ async function getNeteaseUserId(): Promise<string> {
   return '';
 }
 
+/** 从 Cookie / Set-Cookie 字符串中提取指定键值(兼容 set-cookie 数组被 join 成逗号分隔串的情况) */
+function extractCookieValue(cookie: string, name: string): string {
+  if (!cookie) return '';
+  const key = name + '=';
+  let idx = 0;
+  while (idx < cookie.length) {
+    idx = cookie.indexOf(key, idx);
+    if (idx < 0) return '';
+    const before = idx === 0 ? '' : cookie[idx - 1];
+    const validBoundary = before === '' || before === ';' || before === ',' || before === ' ' || before === '\t' || before === '\n';
+    if (validBoundary) {
+      let end = idx + key.length;
+      let value = '';
+      while (end < cookie.length && cookie[end] !== ';' && cookie[end] !== ',') {
+        value += cookie[end];
+        end++;
+      }
+      return value.trim();
+    }
+    idx += key.length;
+  }
+  return '';
+}
+
 function neteaseCookieHeader(cookie: string): string {
   const parts = [WY_BASE_COOKIE];
-  if (cookie) parts.push(cookie);
+  // 登录接口返回的 set-cookie 串会混入 Max-Age/Expires/Domain 以及逗号分隔的重复项,
+  // 整串直接作为 Cookie 发送会让网易云判定未登录;这里只保留有效键值。
+  const musicU = extractCookieValue(cookie, 'MUSIC_U');
+  if (musicU) parts.push('MUSIC_U=' + musicU);
+  const csrf = extractCookieValue(cookie, '__csrf');
+  if (csrf) parts.push('__csrf=' + csrf);
   return parts.join('; ');
 }
 
@@ -774,7 +803,9 @@ async function browseWyPersonal(): Promise<any[]> {
       { referer: 'https://music.163.com/', headers },
     );
     const list: any[] = (d as any).playlist || [];
-    const liked = list.filter((p) => String(p.id) === userId || p.specialType === 5).map(mapWyBrowsePlaylist);
+    const liked = list
+      .filter((p) => (String(p.id) === userId || p.specialType === 5) && String(p.userId) === userId)
+      .map(mapWyBrowsePlaylist);
     const created = list
       .filter((p) => String(p.id) !== userId && p.specialType !== 5 && String(p.userId) === userId && !p.subscribed)
       .map(mapWyBrowsePlaylist)
