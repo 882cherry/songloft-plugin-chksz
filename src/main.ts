@@ -1121,15 +1121,23 @@ function rankKgSongs(songs: any[], q: LyricQuery): any {
   })[0];
 }
 
+/** 粗略判断是否为带时间轴的 LRC(宿主播放器优先展示同步歌词) */
+function isLrcText(text: string): boolean {
+  return /\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/.test(String(text || ''));
+}
+
 // ---- 统一获取:按指定接口或优先级顺序尝试 ----
+// 说明:宿主播放器对 LRC 同步歌词支持最好,因此多接口时优先返回带时间轴的 LRC;
+// 若前面接口只返回纯文本,先记为兜底,继续尝试后续接口找 LRC,最后才用纯文本。
 async function fetchLyric(q: LyricQuery, source?: string): Promise<LyricResult> {
   const { lyricSources } = await getConfig();
-  // 指定了 source 则只试该接口;否则按配置优先级依次尝试,首个成功即返回
+  // 指定了 source 则只试该接口;否则按配置优先级依次尝试
   const tries = source
     ? [source]
     : (lyricSources.length ? lyricSources : DEFAULT_LYRIC_SOURCES);
 
   let lastErr = '';
+  let plainFallback: LyricResult | null = null;
   for (const s of tries) {
     try {
       const r = await (async () => {
@@ -1139,12 +1147,16 @@ async function fetchLyric(q: LyricQuery, source?: string): Promise<LyricResult> 
         if (s === 'kg') return await lyricFromKg(q);
         throw new Error('未知歌词接口: ' + s);
       })();
-      if (r && r.lyric) return r;
+      if (r && r.lyric) {
+        if (isLrcText(r.lyric)) return r;
+        if (!plainFallback) plainFallback = r;
+      }
     } catch (e: any) {
       lastErr = (lastErr ? lastErr + '; ' : '') + `${LYRIC_SOURCE_NAMES[s] || s}: ${e?.message || e}`;
       songloft.log.warn(`[chksz] 歌词接口 ${s} 获取失败: ${e?.message || e}`);
     }
   }
+  if (plainFallback) return plainFallback;
   throw new Error(lastErr || '所有歌词接口均未找到歌词');
 }
 
