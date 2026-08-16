@@ -33,6 +33,16 @@ export function addToQueue(songs) {
   return player.addToQueue(songs.map((s) => s.id))
 }
 
+/**
+ * 将单曲追加到当前播放列表末尾并立即播放。
+ * 不会覆盖宿主现有的播放列表(区别于 playSongs 的 setQueue 替换行为)。
+ */
+export function playSongAppend(song) {
+  if (!hasPlayer()) return Promise.reject(new Error('宿主播放器不可用'))
+  if (!song || !song.id) return Promise.reject(new Error('缺少歌曲 id'))
+  return player.addToQueue([song.id]).then(() => player.play(song.id))
+}
+
 /** 播放器是否就绪(宿主已注入) */
 export function isReady() { return !!player }
 

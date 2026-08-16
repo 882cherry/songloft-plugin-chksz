@@ -2,7 +2,7 @@
 
 import { api, hasClientPlayer } from './api.js'
 import { setStatus, snackbar, platformName } from './util.js'
-import { playSongs, addToQueue } from './player.js'
+import { playSongAppend, addToQueue } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
 import { openConfig } from './config.js'
 import { hideBrowse } from './browse.js'
@@ -249,7 +249,7 @@ function handle(item, action) {
       const song = { id: data.id, title: data.title || item.title, artist: item.artist, album: item.album, cover_url: item.cover_url }
       if (action === 'play') {
         try {
-          await playSongs([song])
+          await playSongAppend(song)
           // 播放界面由宿主承担(底部播放条/客户端播放器)
           setStatus(st, '已开始播放:' + song.title, 'ok')
           snackbar('已开始播放: ' + song.title)
