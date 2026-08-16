@@ -22,6 +22,36 @@ function safe(fn, name) {
   }
 }
 
+// 手机端:搜索行随滚动方向自动隐藏/显示(向上滑隐藏,向下滑显示,带动画)
+function initSearchBarAutoHide() {
+  const bar = document.querySelector('.search-bar')
+  if (!bar) return
+  const scrollEls = [el('browse'), el('searchContainer')].filter(Boolean)
+  const lastTops = new WeakMap()
+  scrollEls.forEach((scrollEl) => {
+    lastTops.set(scrollEl, 0)
+    let ticking = false
+    scrollEl.addEventListener('scroll', () => {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(() => {
+        const st = scrollEl.scrollTop
+        const last = lastTops.get(scrollEl) || 0
+        const diff = st - last
+        if (st <= 0) {
+          bar.classList.remove('hide-search')
+        } else if (diff > 4) {
+          bar.classList.add('hide-search')
+        } else if (diff < -4) {
+          bar.classList.remove('hide-search')
+        }
+        lastTops.set(scrollEl, st)
+        ticking = false
+      })
+    }, { passive: true })
+  })
+}
+
 function init() {
   // 播放器(仅等待宿主播放器注入,播放界面由宿主承担)
   safe(initPlayer, 'player')
@@ -46,6 +76,9 @@ function init() {
 
   // 歌词搜索 / 重新获取
   safe(initLyric, 'lyric')
+
+  // 手机端搜索行自动隐藏/显示
+  safe(initSearchBarAutoHide, 'searchBarAutoHide')
 }
 
 // 等 DOM 就绪(module 脚本默认 defer,直接跑)

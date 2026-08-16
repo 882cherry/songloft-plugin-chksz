@@ -138,6 +138,9 @@
                     "select settings";
                 gap: 8px;
                 padding: 8px 10px;
+                transition: max-height .28s cubic-bezier(.4,0,.2,1), padding .28s cubic-bezier(.4,0,.2,1), opacity .2s ease, border-width .28s ease;
+                max-height: 120px;
+                overflow: hidden;
             }
             .search-bar .text-field { grid-area: input; }
             .search-bar .btn-filled { grid-area: search; }
@@ -146,6 +149,16 @@
                 width: 100%; flex: 1 1 auto;
             }
             .search-bar .btn-icon { grid-area: settings; }
+
+            /* 向上滑动内容时隐藏搜索行,向下滑动回顶部时显示(带动画) */
+            .search-bar.hide-search {
+                max-height: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+                border-bottom-width: 0;
+                opacity: 0;
+                pointer-events: none;
+            }
         }
 
         /* 平台多选 chips */
