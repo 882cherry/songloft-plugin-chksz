@@ -5,12 +5,13 @@ import { snackbar, platformName, fmtTime } from './util.js'
 import { playSongs } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
 import { openImportPlaylist } from './importPlaylist.js'
-import { openLyricForSong } from './lyric.js'
+import { openLyricForSong, openLyricSearch } from './lyric.js'
 
 const TABS = [
   { code: 'wy', name: '网易云' },
   { code: 'tx', name: 'QQ' },
   { code: 'kg', name: '酷狗' },
+  { code: 'lyric', name: '歌词' },
 ]
 const cache = {} // platform -> modules data(内存缓存,切换标签不重复请求)
 
@@ -33,6 +34,10 @@ function renderTabs() {
     b.className = 'browse-tab' + (t.code === currentTab ? ' on' : '')
     b.textContent = t.name
     b.addEventListener('click', () => {
+      if (t.code === 'lyric') {
+        openLyricSearch()
+        return
+      }
       if (currentTab === t.code) return
       currentTab = t.code
       renderTabs()

@@ -4,7 +4,7 @@ import { api } from './api.js'
 import { snackbar } from './util.js'
 import { refreshNeteaseStatus } from './neteaseLogin.js'
 import { openLinkImport } from './importPlaylist.js'
-import { LYRIC_SOURCES } from './lyric.js'
+import { LYRIC_SOURCES, openLyricSearch } from './lyric.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -72,6 +72,11 @@ export function initConfig(onConfigSaved) {
     closeConfig()
     openLinkImport()
   })
+  const openLyricBtn = el('openLyricSearchBtn')
+  if (openLyricBtn) openLyricBtn.addEventListener('click', () => {
+    closeConfig()
+    openLyricSearch()
+  })
 }
 
 export function openConfig() {
@@ -90,7 +95,9 @@ export function openConfig() {
       el('apiKeyHint').textContent = '已配置,留空保存则不修改'
     }
     if (data.quality) qEl.value = data.quality
-    // 歌词接口优先级
+    // 歌词开关 + 接口优先级
+    const enabledEl = el('lyricsEnabled')
+    if (enabledEl) enabledEl.checked = data.lyrics_enabled !== false
     const savedOrder = data.lyric_sources || LYRIC_SOURCES.map((s) => s.code)
     const merged = savedOrder.concat(LYRIC_SOURCES.map((s) => s.code).filter((c) => !savedOrder.includes(c)))
     LYRIC_SOURCES.forEach((s) => { if (lyricEnabled[s.code] === undefined) lyricEnabled[s.code] = true })
@@ -112,6 +119,8 @@ function saveConfig() {
   const key = el('apiKey').value.trim()
   if (key) body.api_key = key
   body.lyric_sources = collectLyricSources()
+  const enabledEl = el('lyricsEnabled')
+  if (enabledEl) body.lyrics_enabled = enabledEl.checked
   api('api/settings', { method: 'POST', body: JSON.stringify(body) })
     .then((data) => {
       btn.disabled = false

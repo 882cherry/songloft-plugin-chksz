@@ -50,7 +50,7 @@ function cleanLyricSources(arr: unknown[]): string[] {
 }
 
 // ===== 配置 =====
-async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[]; lyricSources: string[] }> {
+async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[]; lyricSources: string[]; lyricsEnabled: boolean }> {
   const apiKey = ((await songloft.storage.get('api_key')) as string) || '';
   const quality = ((await songloft.storage.get('quality')) as string) || 'flac';
   let platforms: string[] = [...ALL_PLATFORMS];
@@ -77,7 +77,8 @@ async function getConfig(): Promise<{ apiKey: string; quality: string; platforms
   } catch {
     /* 非法配置回退全部 */
   }
-  return { apiKey, quality, platforms, lyricSources };
+  const lyricsEnabled = (await songloft.storage.get('lyrics_enabled')) !== false; // 默认开启
+  return { apiKey, quality, platforms, lyricSources, lyricsEnabled };
 }
 
 // ===== 网易云登录(扫码 / Cookie 导入) =====
@@ -495,9 +496,9 @@ router.post('/api/search/select', async (req) => {
 });
 router.post('/api/music/url', createMusicUrlHandler({ resolveUrl, fallbackSearch }));
 
-// 插件设置(API Key / 音质 / 歌词接口优先级)
+// 插件设置(API Key / 音质 / 歌词接口优先级 / 歌词开关)
 router.get('/api/settings', async () => {
-  const { apiKey, quality, platforms, lyricSources } = await getConfig();
+  const { apiKey, quality, platforms, lyricSources, lyricsEnabled } = await getConfig();
   const wyProfile = await getNeteaseProfile();
   return jsonResponse({
     api_key_set: !!apiKey,
@@ -505,6 +506,7 @@ router.get('/api/settings', async () => {
     quality,
     platforms,
     lyric_sources: lyricSources,
+    lyrics_enabled: lyricsEnabled,
     netease_login: {
       logged_in: !!(await getNeteaseCookie()),
       nickname: wyProfile?.nickname || wyProfile?.profile?.nickname || '',
@@ -528,6 +530,9 @@ router.post('/api/settings', async (req) => {
   if (Array.isArray(body.lyric_sources)) {
     const clean = cleanLyricSources(body.lyric_sources);
     if (clean.length) await songloft.storage.set('lyric_sources', JSON.stringify(clean));
+  }
+  if (typeof body.lyrics_enabled === 'boolean') {
+    await songloft.storage.set('lyrics_enabled', body.lyrics_enabled);
   }
   return jsonResponse({ ok: true });
 });
@@ -1206,6 +1211,11 @@ router.get('/lyric-search', async (req) => {
 });
 
 async function handleLyricSearch(req: HTTPRequest, isGet: boolean): Promise<HTTPResponse> {
+  const { lyricsEnabled } = await getConfig();
+  if (!lyricsEnabled) {
+    return jsonResponse({ error: 'lyrics search disabled' }, 503);
+  }
+
   let body: any = {};
   if (isGet) {
     const q = parseQuery(req.query || '');
@@ -1279,6 +1289,48 @@ router.post('/api/lyric/fetch', async (req) => {
     return jsonResponse({ error: String(e?.message || e) }, 404);
   }
 });
+
+// 兼容官方歌词插件的配置/测试接口(便于前端与外部工具使用)
+router.get('/config', async () => {
+  const { lyricsEnabled, lyricSources } = await getConfig();
+  return jsonResponse({
+    enabled: lyricsEnabled,
+    provider: lyricSources[0] || 'lrclib',
+    customUrl: '',
+    lyric_sources: lyricSources,
+  });
+});
+
+router.put('/config', async (req) => {
+  let body: any = {};
+  try { body = JSON.parse((req.body as string) || '{}'); } catch { /* ignore */ }
+  if (typeof body.enabled === 'boolean') {
+    await songloft.storage.set('lyrics_enabled', body.enabled);
+  }
+  if (Array.isArray(body.lyric_sources)) {
+    const clean = cleanLyricSources(body.lyric_sources);
+    if (clean.length) await songloft.storage.set('lyric_sources', JSON.stringify(clean));
+  }
+  const { lyricsEnabled, lyricSources } = await getConfig();
+  return jsonResponse({
+    status: 'ok',
+    config: { enabled: lyricsEnabled, provider: lyricSources[0] || 'lrclib', customUrl: '', lyric_sources: lyricSources },
+  });
+});
+
+router.get('/test-search', async (req) => {
+  const q = parseQuery(req.query || '');
+  const title = String(q.title || '').trim();
+  const artist = String(q.artist || '').trim();
+  if (!title && !artist) return jsonResponse({ error: 'title or artist required' }, 400);
+  try {
+    const result = await fetchLyric({ title, artist });
+    return jsonResponse({ success: true, preview: result.lyric.slice(0, 300), source: result.source });
+  } catch (e: any) {
+    return jsonResponse({ success: false, error: String(e?.message || e) }, 404);
+  }
+});
+
 
 
 // ---- 网易云:个人歌单(登录后) + 推荐歌单 + 排行榜 ----
@@ -1840,9 +1892,10 @@ router.post('/api/search/topone', async (req) => {
 async function onInit(): Promise<void> {
   songloft.log.info('[chksz] ChKSz 音源插件已加载');
 
-  // 注册为宿主歌词提供者:歌曲无歌词时宿主自动调 /lyric-search
+  // 注册为宿主歌词提供者:歌曲无歌词时宿主自动调 /lyric-search(受 lyrics_enabled 控制)
   try {
-    if (songloft.lyrics && typeof songloft.lyrics.registerProvider === 'function') {
+    const { lyricsEnabled } = await getConfig();
+    if (lyricsEnabled && songloft.lyrics && typeof songloft.lyrics.registerProvider === 'function') {
       songloft.lyrics.registerProvider();
       songloft.log.info('[chksz] 已注册为歌词提供者');
     }
@@ -1869,9 +1922,21 @@ async function onInit(): Promise<void> {
   }, 2000);
 }
 
+async function onDeinit(): Promise<void> {
+  try {
+    if (songloft.lyrics && typeof songloft.lyrics.unregisterProvider === 'function') {
+      songloft.lyrics.unregisterProvider();
+      songloft.log.info('[chksz] 已取消注册歌词提供者');
+    }
+  } catch (e: any) {
+    songloft.log.warn(`[chksz] 取消注册歌词提供者失败: ${e?.message || e}`);
+  }
+}
+
 async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
   return await router.handle(req);
 }
 
 globalThis.onInit = onInit;
+globalThis.onDeinit = onDeinit;
 globalThis.onHTTPRequest = onHTTPRequest;
