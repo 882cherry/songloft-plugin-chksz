@@ -217,8 +217,14 @@
             display: flex; align-items: center; gap: 6px;
         }
         .browse-module-title .material-symbols-outlined { font-size: 18px; color: var(--md-primary); }
-        .browse-cards { display: flex; flex-wrap: wrap; gap: 10px; }
-        .browse-card { width: calc(33.333% - 7px); min-width: 96px; cursor: pointer; }
+        .browse-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
+        .browse-card { min-width: 0; cursor: pointer; }
+        @media (min-width: 700px) {
+            .browse-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+        }
+        @media (min-width: 1200px) {
+            .browse-cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+        }
         .browse-card .bc-cover {
             width: 100%; aspect-ratio: 1; border-radius: 12px; object-fit: cover;
             background: var(--md-surface-variant); display: block;
