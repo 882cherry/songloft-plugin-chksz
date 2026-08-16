@@ -2,6 +2,7 @@
 
 import { api } from './api.js'
 import { snackbar } from './util.js'
+import { refreshWyAfterLogin } from './browse.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -118,15 +119,15 @@ async function pollQrStatus() {
   }
 }
 
-// ===== 网页登录:手机号 + 密码,登录成功后自动保存 Cookie =====
+// ===== 网页登录:显示网易云官方登录页(PC/手机自适应) =====
 function openWebSheet() {
   el('wyWebBackdrop').style.display = 'block'
   requestAnimationFrame(() => el('wyWebSheet').classList.add('show'))
   setTimeout(() => el('wyWebSheet').classList.add('show'), 60)
   el('wyWebStatus').textContent = ''
   el('wyWebStatus').className = 'dialog-status'
-  el('wyPassword').value = ''
   el('wyWebSaveBtn').disabled = false
+  el('wyLoginFrame').src = 'https://music.163.com/m/login'
 }
 
 function closeWebSheet() {
@@ -134,32 +135,34 @@ function closeWebSheet() {
   el('wyWebSheet').classList.remove('show')
 }
 
+function reloadWebLogin() {
+  el('wyLoginFrame').src = 'https://music.163.com/m/login'
+  el('wyWebStatus').textContent = ''
+  el('wyWebStatus').className = 'dialog-status'
+}
+
 async function submitWebLogin() {
-  const phone = el('wyPhone').value.trim()
-  const countrycode = el('wyPhoneCountry').value
-  const password = el('wyPassword').value
   const st = el('wyWebStatus')
   const btn = el('wyWebSaveBtn')
-  if (!phone || !password) {
-    st.textContent = '请输入手机号和密码'
-    st.className = 'dialog-status err'
-    return
-  }
   btn.disabled = true
-  st.textContent = '登录中，正在自动获取 Cookie…'
+  st.textContent = '检测登录状态中…'
   st.className = 'dialog-status'
   try {
-    const d = await api('api/netease/login/cellphone', {
-      method: 'POST',
-      body: JSON.stringify({ phone, countrycode, password }),
-    })
-    if (!d || !d.ok) throw new Error((d && d.error) || '登录失败')
-    closeWebSheet()
-    refreshNeteaseStatus()
-    snackbar('网易云登录成功')
+    await refreshNeteaseStatus()
+    const d = await api('api/netease/login/status')
+    if (d && d.logged_in) {
+      st.textContent = '登录成功 ✓'
+      refreshWyAfterLogin()
+      snackbar('网易云登录成功')
+      setTimeout(closeWebSheet, 500)
+    } else {
+      btn.disabled = false
+      st.textContent = '网页登录成功但浏览器 Cookie 无法被插件跨域读取：请用 Cookie 导入粘贴 MUSIC_U；如需全自动请使用扫码登录。'
+      st.className = 'dialog-status err'
+    }
   } catch (e) {
     btn.disabled = false
-    st.textContent = '登录失败：' + (e.message || e)
+    st.textContent = '检测失败：' + (e.message || e)
     st.className = 'dialog-status err'
   }
 }
@@ -197,6 +200,7 @@ async function saveCookieImport() {
     if (!d || !d.ok) throw new Error((d && d.error) || '登录失败')
     closeCookieSheet()
     refreshNeteaseStatus()
+    refreshWyAfterLogin()
     snackbar('网易云 Cookie 登录成功')
   } catch (e) {
     btn.disabled = false
@@ -209,6 +213,7 @@ async function logoutNetease() {
   try {
     await api('api/netease/logout', { method: 'POST' })
     refreshNeteaseStatus()
+    refreshWyAfterLogin()
     snackbar('已退出网易云登录')
   } catch (e) {
     snackbar('退出失败：' + (e.message || e))
@@ -225,9 +230,7 @@ export function initNeteaseLogin() {
   el('wyWebCancelBtn').addEventListener('click', closeWebSheet)
   el('wyWebBackdrop').addEventListener('click', closeWebSheet)
   el('wyWebSaveBtn').addEventListener('click', submitWebLogin)
-  el('wyPassword').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitWebLogin()
-  })
+  el('wyWebReloadBtn').addEventListener('click', reloadWebLogin)
 
   el('wyCookieLoginBtn').addEventListener('click', openCookieSheet)
   el('wyCookieCancelBtn').addEventListener('click', closeCookieSheet)

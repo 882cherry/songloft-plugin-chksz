@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "ChKSz 音源",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "通过 api.chksz.com 搜索并解析网易云/QQ/酷狗播放链接（需 API Key）",
   "author": "ChKSz User",
   "homepage": "https://api.chksz.com",
@@ -18,7 +18,7 @@
   ],
   "icon": "icon.1cb24a8e.svg",
   "updateUrl": "https://raw.githubusercontent.com/882cherry/songloft-plugin-chksz/main/plugin.json",
-  "download_url": "https://github.com/882cherry/songloft-plugin-chksz/releases/download/v0.1.14/chksz.jsplugin.zip",
-  "entryHash": "66355540d91abc4547418d3e505b83f713a30e9aaa9826fc12cb06a0fd8d5d4c",
-  "zipHash": "baa46651765b1b8c05e60376ae8d8f917d80e2d708657b9e6c494f92673024f7"
+  "download_url": "https://github.com/882cherry/songloft-plugin-chksz/releases/download/v0.1.15/chksz.jsplugin.zip",
+  "entryHash": "0e2cb98b8f84c614929c85821ab9f3da0403817b070ce773a148cc5daf8d0ff3",
+  "zipHash": "c4f329d8fc928013e7627a075d5a4a3b548b54551ac9fb4f04f18cd04e4c2033"
 }

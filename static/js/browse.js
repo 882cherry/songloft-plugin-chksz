@@ -57,6 +57,12 @@ export function hideBrowse() {
   el('browse').style.display = 'none'
 }
 
+/** 网易云登录状态变化后刷新首页(个人歌单需要登录 Cookie) */
+export function refreshWyAfterLogin() {
+  delete cache['wy']
+  if (currentTab === 'wy') loadModules('wy')
+}
+
 function loadModules(platform) {
   const box = el('browse')
   box.style.display = ''

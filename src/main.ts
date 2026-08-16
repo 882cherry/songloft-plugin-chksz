@@ -85,6 +85,12 @@ async function saveNeteaseLogin(cookie: string, profile: any): Promise<void> {
   if (profile) await songloft.storage.set(WY_PROFILE_KEY, JSON.stringify(profile));
 }
 
+async function getNeteaseUserId(): Promise<string> {
+  const p = await getNeteaseProfile();
+  const v = p?.profile?.userId ?? p?.profile?.account?.id ?? p?.account?.id ?? p?.userId ?? p?.id;
+  return v ? String(v) : '';
+}
+
 function neteaseCookieHeader(cookie: string): string {
   const parts = [WY_BASE_COOKIE];
   if (cookie) parts.push(cookie);
@@ -690,11 +696,52 @@ async function browseFetch(url: string, opts?: { method?: string; body?: string;
   }
 }
 
-// ---- 网易云:推荐歌单 + 排行榜 ----
+// ---- 网易云:个人歌单(登录后) + 推荐歌单 + 排行榜 ----
+function mapWyBrowsePlaylist(p: any) {
+  return {
+    id: String(p.id),
+    name: p.name || '',
+    cover: p.coverImgUrl || p.picUrl || '',
+    play_count: p.playCount || 0,
+    track_count: p.trackCount || 0,
+    subscribed: !!p.subscribed,
+  };
+}
+
+async function browseWyPersonal(): Promise<any[]> {
+  const modules: any[] = [];
+  const cookie = await getNeteaseCookie();
+  const userId = await getNeteaseUserId();
+  if (!cookie || !userId) return modules;
+
+  try {
+    const headers = { Cookie: neteaseCookieHeader(cookie) };
+    const d = await browseFetch(
+      'https://music.163.com/api/user/playlist?uid=' + encodeURIComponent(userId) + '&limit=1000&offset=0',
+      { referer: 'https://music.163.com/', headers },
+    );
+    const list: any[] = (d as any).playlist || [];
+    const liked = list.filter((p) => String(p.id) === userId || p.specialType === 5).map(mapWyBrowsePlaylist);
+    const created = list
+      .filter((p) => String(p.id) !== userId && p.specialType !== 5 && String(p.userId) === userId && !p.subscribed)
+      .map(mapWyBrowsePlaylist)
+      .slice(0, 50);
+    const collected = list.filter((p) => p.subscribed).map(mapWyBrowsePlaylist).slice(0, 50);
+
+    if (liked.length) modules.push({ type: 'playlists', title: '我喜欢的音乐', items: liked });
+    if (created.length) modules.push({ type: 'playlists', title: '创建的歌单', items: created });
+    if (collected.length) modules.push({ type: 'playlists', title: '收藏的歌单', items: collected });
+  } catch (e: any) {
+    songloft.log.warn(`[chksz] 获取网易云个人歌单失败: ${e?.message || e}`);
+  }
+  return modules;
+}
+
 async function browseWy(): Promise<any> {
-  const [pl, tl] = await Promise.all([
+  const [pl, tl, personal] = await Promise.all([
     browseFetch('https://music.163.com/api/personalized/playlist?limit=9', { referer: 'https://music.163.com/' }),
     browseFetch('https://music.163.com/api/toplist', { referer: 'https://music.163.com/' }),
+    browseWyPersonal(),
   ]);
   const playlists = ((pl as any).result || []).map((p: any) => ({
     id: String(p.id),
@@ -709,12 +756,11 @@ async function browseWy(): Promise<any> {
     cover: t.coverImgUrl || '',
     desc: t.description || '',
   }));
-  return {
-    modules: [
-      { type: 'playlists', title: '猜你喜欢 · 推荐歌单', items: playlists },
-      { type: 'toplists', title: '排行榜', items: toplists },
-    ],
-  };
+  const modules: any[] = [];
+  modules.push(...personal);
+  modules.push({ type: 'playlists', title: '猜你喜欢 · 推荐歌单', items: playlists });
+  modules.push({ type: 'toplists', title: '排行榜', items: toplists });
+  return { modules };
 }
 
 // 网易云歌单详情:
