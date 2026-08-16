@@ -119,8 +119,8 @@ export function openLyricForSong(song) {
 }
 
 // ===== 为「当前播放歌曲」打开歌词面板(尽力从宿主播放器读取) =====
-export function openLyricForCurrent() {
-  const song = readCurrentSong()
+export async function openLyricForCurrent() {
+  const song = await readCurrentSong()
   if (!song || !song.title) {
     // 读不到当前歌曲就退化为关键词搜索
     openLyricSearch()
@@ -129,11 +129,29 @@ export function openLyricForCurrent() {
   openLyricForSong(song)
 }
 
-/** 尝试从宿主播放器读取当前歌曲(api 未知,防御式探测常见字段/方法) */
-function readCurrentSong() {
+/** 尝试从宿主播放器读取当前歌曲(优先 getState,再回退常见字段/方法) */
+async function readCurrentSong() {
   try {
     const p = window.SongloftPlugin && window.SongloftPlugin.player
     if (!p) return null
+
+    // 宿主播放器标准接口:getState() 返回 { currentSong / current_song / queue ... }
+    if (typeof p.getState === 'function') {
+      try {
+        const state = await p.getState()
+        const raw = (state && (state.currentSong || state.current_song || state.current)) || null
+        if (raw && (raw.title || raw.name)) {
+          return {
+            title: raw.title || raw.name || '',
+            artist: raw.artist || raw.artists || raw.singer || '',
+            album: raw.album || '',
+            duration: raw.duration || 0,
+            source_data: raw.source_data || raw.sourceData || undefined,
+          }
+        }
+      } catch (e) { /* 继续尝试其他方式 */ }
+    }
+
     const raw =
       (typeof p.getCurrentSong === 'function' ? p.getCurrentSong() : null) ||
       (typeof p.getCurrent === 'function' ? p.getCurrent() : null) ||
