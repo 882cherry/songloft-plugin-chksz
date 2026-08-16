@@ -1901,14 +1901,9 @@ router.post('/api/search/topone', async (req) => {
     if (!results.length) return jsonResponse({ code: 1, msg: 'not found', data: null });
 
     const first = results[0];
-    let url = '';
-    try {
-      const resolved = await resolveUrl(first.source_data);
-      url = typeof resolved === 'string' ? resolved : resolved.url;
-    } catch (e: any) {
-      songloft.log.warn(`[chksz] topone 预解析失败(将走解析型): ${e?.message || e}`);
-    }
 
+    // 不预解析真实播放地址:miot 在 no_import 时也能回退为「入库 + plugin_entry_path 解析型」,
+    // 避免 topone 因 ChKSz URL 解析慢导致 miot 6s 超时。
     return jsonResponse({
       code: 0,
       msg: 'ok',
@@ -1918,7 +1913,7 @@ router.post('/api/search/topone', async (req) => {
         album: first.album,
         duration: first.duration,
         cover_url: first.cover_url,
-        url, // 直链型;为空时 miot 走「入库 + plugin_entry_path 解析型」链路
+        url: '', // 直链型为空时 miot 走「入库 + plugin_entry_path 解析型」链路
         plugin_entry_path: 'chksz',
         source_data: first.source_data,
         dedup_key: `chksz_${first.source_data.platform}_${first.source_data.id || first.source_data.mid}`,
