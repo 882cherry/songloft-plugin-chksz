@@ -1095,6 +1095,7 @@ async function lyricFromKg(q: LyricQuery): Promise<LyricResult> {
   let hash = q.source_data?.id ? String(q.source_data.id) : '';
   let matchedTitle = q.title || '';
   let matchedArtist = q.artist || '';
+  let durationMs = Number(q.duration) * 1000 || 0;
   if (!hash) {
     const search = await browseFetch(
       'http://mobilecdn.kugou.com/api/v3/search/song?format=json&page=1&pagesize=5&keyword=' + encodeURIComponent(keyword),
@@ -1106,10 +1107,13 @@ async function lyricFromKg(q: LyricQuery): Promise<LyricResult> {
     hash = String(hit.hash || '');
     matchedTitle = hit.songname || q.title || '';
     matchedArtist = (hit.singername || '').replace(/独立|独立音乐人/g, '') || q.artist || '';
+    if (!durationMs) durationMs = Number(hit.duration) * 1000 || 0;
   }
 
+  // 酷狗 krc 接口需要 timelength 才会返回内容;没有时长时给一个合理兜底
+  const timelength = durationMs > 0 ? String(durationMs) : '300000';
   const lyric = await browseFetchText(
-    'http://m.kugou.com/app/i/krc.php?cmd=100&hash=' + encodeURIComponent(hash) + '&timelength=' + encodeURIComponent(String(Number(q.duration) * 1000 || '')),
+    'http://m.kugou.com/app/i/krc.php?cmd=100&hash=' + encodeURIComponent(hash) + '&timelength=' + encodeURIComponent(timelength),
     { referer: 'http://m.kugou.com/', headers: { 'Accept': 'text/plain, */*' } },
   ).catch(() => '');
 
