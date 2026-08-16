@@ -181,6 +181,18 @@
         .sheet-body { padding: 0 8px 14px; overflow-y: auto; flex: 1; }
 
         /* 配置 */
+        .config-tabs {
+            display: flex; gap: 6px; padding: 2px 18px 6px;
+            border-bottom: 1px solid var(--md-outline-variant); flex: 0 0 auto;
+        }
+        .config-tab {
+            padding: 7px 14px; border-radius: var(--md-radius-full);
+            border: 1px solid var(--md-outline); background: var(--md-surface);
+            color: var(--md-on-surface-variant); font-size: 13px; font-weight: 600;
+            cursor: pointer; white-space: nowrap;
+        }
+        .config-tab.on { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
+        .config-pane { overflow-y: auto; }
         .dialog-body { padding: 14px 18px 4px; }
         .dialog-body label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
         .dialog-body label:first-child { margin-top: 0; }
@@ -372,7 +384,12 @@
     <div class="bottom-sheet" id="configSheet">
         <div class="sheet-handle"></div>
         <div class="sheet-title">插件设置</div>
-        <div class="dialog-body">
+        <div class="config-tabs" id="configTabs">
+            <button type="button" class="config-tab on" data-pane="basic">基本设置</button>
+            <button type="button" class="config-tab" data-pane="lyric">歌词设置</button>
+            <button type="button" class="config-tab" data-pane="netease">网易云登录</button>
+        </div>
+        <div class="dialog-body config-pane" id="configPaneBasic">
             <label for="apiKey">API Key</label>
             <input type="password" class="text-field" id="apiKey" placeholder="api.chksz.com 登录后获取" autocomplete="off">
             <div class="dialog-hint" id="apiKeyHint">Key 保存在服务端,不会写入插件代码</div>
@@ -383,6 +400,10 @@
                 <option value="128k">标准 (128 kbps)</option>
             </select>
             <div class="dialog-hint">网易云: lossless / exhigh / standard;QQ·酷狗: flac / 320k / 128k</div>
+            <label>歌单导入</label>
+            <button type="button" class="btn-outlined" id="importLinkFromConfigBtn" style="width:100%">导入歌单链接</button>
+        </div>
+        <div class="dialog-body config-pane" id="configPaneLyric" style="display:none">
             <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
                 <input type="checkbox" id="lyricsEnabled" style="width:17px;height:17px;accent-color:var(--md-primary)">
                 <span>启用歌词搜索（无歌词时自动获取）</span>
@@ -391,6 +412,8 @@
             <div class="dialog-hint">选中要启用的歌词接口，可用 ↑↓ 调整优先级；前面的接口优先尝试。</div>
             <div id="lyricSourcesList" class="lyric-source-list"></div>
             <button type="button" class="btn-outlined" id="openLyricSearchBtn" style="width:100%;margin-top:8px">打开歌词搜索</button>
+        </div>
+        <div class="dialog-body config-pane" id="configPaneNetease" style="display:none">
             <label>网易云登录</label>
             <div class="dialog-hint" id="wyLoginStatus">未登录</div>
             <div class="login-actions">
@@ -399,8 +422,6 @@
                 <button type="button" class="btn-outlined" id="wyCookieLoginBtn">Cookie 导入</button>
                 <button type="button" class="btn-text" id="wyLogoutBtn" style="display:none">退出登录</button>
             </div>
-            <label>歌单导入</label>
-            <button type="button" class="btn-outlined" id="importLinkFromConfigBtn" style="width:100%">导入歌单链接</button>
         </div>
         <div class="dialog-status" id="configStatus"></div>
         <div class="sheet-footer">

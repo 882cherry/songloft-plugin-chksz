@@ -56,6 +56,18 @@ function collectLyricSources() {
   return lyricOrder.filter((code) => lyricEnabled[code] !== false)
 }
 
+// ===== 多级菜单:基本设置 / 歌词设置 / 网易云登录 =====
+function switchConfigTab(name) {
+  document.querySelectorAll('.config-tab').forEach((t) => {
+    t.classList.toggle('on', t.dataset.pane === name)
+  })
+  ;['basic', 'lyric', 'netease'].forEach((p) => {
+    const pane = el('configPane' + p.charAt(0).toUpperCase() + p.slice(1))
+    if (pane) pane.style.display = p === name ? '' : 'none'
+  })
+  if (name === 'netease') refreshNeteaseStatus()
+}
+
 export function initConfig(onConfigSaved) {
   onSaved = onConfigSaved || null
   // 旧版播放器栏的设置按钮(可能不存在,需防御)
@@ -67,6 +79,9 @@ export function initConfig(onConfigSaved) {
   el('configCancelBtn').addEventListener('click', closeConfig)
   el('configBackdrop').addEventListener('click', closeConfig)
   el('saveConfigBtn').addEventListener('click', saveConfig)
+  document.querySelectorAll('.config-tab').forEach((tab) => {
+    tab.addEventListener('click', () => switchConfigTab(tab.dataset.pane))
+  })
   const importLink = el('importLinkFromConfigBtn')
   if (importLink) importLink.addEventListener('click', () => {
     closeConfig()
@@ -85,6 +100,7 @@ export function openConfig() {
   // 兜底:后台/隐藏 iframe 中 rAF 可能不触发,用定时器再补一次(幂等)
   setTimeout(() => el('configSheet').classList.add('show'), 60)
   el('configStatus').textContent = ''
+  switchConfigTab('basic')
   api('api/settings').then((data) => {
     if (!data) return
     const keyEl = el('apiKey')
