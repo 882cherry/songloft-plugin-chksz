@@ -56,14 +56,22 @@ function collectLyricSources() {
   return lyricOrder.filter((code) => lyricEnabled[code] !== false)
 }
 
-// ===== 多级菜单:基本设置 / 歌词设置 / 网易云登录 =====
-function switchConfigTab(name) {
-  document.querySelectorAll('.config-tab').forEach((t) => {
-    t.classList.toggle('on', t.dataset.pane === name)
-  })
+// ===== 一级/二级菜单:类似手机设置 =====
+function showConfigMenu() {
+  const menu = el('configMenu')
+  if (menu) menu.style.display = ''
   ;['basic', 'lyric', 'netease'].forEach((p) => {
-    const pane = el('configPane' + p.charAt(0).toUpperCase() + p.slice(1))
-    if (pane) pane.style.display = p === name ? '' : 'none'
+    const page = el('configPage' + p.charAt(0).toUpperCase() + p.slice(1))
+    if (page) page.style.display = 'none'
+  })
+}
+
+function openConfigSub(name) {
+  const menu = el('configMenu')
+  if (menu) menu.style.display = 'none'
+  ;['basic', 'lyric', 'netease'].forEach((p) => {
+    const page = el('configPage' + p.charAt(0).toUpperCase() + p.slice(1))
+    if (page) page.style.display = p === name ? '' : 'none'
   })
   if (name === 'netease') refreshNeteaseStatus()
 }
@@ -79,8 +87,11 @@ export function initConfig(onConfigSaved) {
   el('configCancelBtn').addEventListener('click', closeConfig)
   el('configBackdrop').addEventListener('click', closeConfig)
   el('saveConfigBtn').addEventListener('click', saveConfig)
-  document.querySelectorAll('.config-tab').forEach((tab) => {
-    tab.addEventListener('click', () => switchConfigTab(tab.dataset.pane))
+  document.querySelectorAll('.config-menu-row').forEach((row) => {
+    row.addEventListener('click', () => openConfigSub(row.dataset.target))
+  })
+  document.querySelectorAll('.config-back').forEach((btn) => {
+    btn.addEventListener('click', showConfigMenu)
   })
   const importLink = el('importLinkFromConfigBtn')
   if (importLink) importLink.addEventListener('click', () => {
@@ -100,7 +111,7 @@ export function openConfig() {
   // 兜底:后台/隐藏 iframe 中 rAF 可能不触发,用定时器再补一次(幂等)
   setTimeout(() => el('configSheet').classList.add('show'), 60)
   el('configStatus').textContent = ''
-  switchConfigTab('basic')
+  showConfigMenu()
   api('api/settings').then((data) => {
     if (!data) return
     const keyEl = el('apiKey')
