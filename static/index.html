@@ -159,6 +159,10 @@
                 opacity: 0;
                 pointer-events: none;
             }
+
+            /* 手机端平台标签更紧凑,减少空白 */
+            .browse-tabs { padding: 3px 8px 2px; gap: 5px; }
+            .browse-tab { padding: 3px 10px; font-size: 12px; }
         }
 
         /* 平台多选 chips */
@@ -269,11 +273,11 @@
         .pl-row .pl-check { color: var(--md-primary); }
 
         /* ===== 首页浏览(平台标签 + 猜你喜欢/推荐歌单/排行榜) ===== */
-        .browse-tabs { display: flex; gap: 8px; padding: 10px 14px 0; flex: 0 0 auto; }
+        .browse-tabs { display: flex; gap: 6px; padding: 4px 10px 2px; flex: 0 0 auto; }
         .browse-tab {
-            padding: 7px 18px; border-radius: var(--md-radius-full);
+            padding: 4px 12px; border-radius: var(--md-radius-full);
             border: 1px solid var(--md-outline); background: var(--md-surface);
-            color: var(--md-on-surface-variant); font-size: 13px; font-weight: 600;
+            color: var(--md-on-surface-variant); font-size: 12px; font-weight: 600;
             cursor: pointer;
         }
         .browse-tab.on { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
