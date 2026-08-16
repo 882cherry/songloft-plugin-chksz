@@ -317,7 +317,18 @@ function scoreTrack(item: SearchResultItem, keyword: string, hint?: { title?: st
 }
 
 function rankResults(items: SearchResultItem[], keyword: string, hint?: { title?: string; artist?: string }): SearchResultItem[] {
-  return [...items].sort((a, b) => scoreTrack(b, keyword, hint) - scoreTrack(a, keyword, hint));
+  // 同一歌手在多个平台重复出现时,更可能是原唱;给予小幅加成,避免翻唱/remix 抢占 topone
+  const artistFreq = new Map<string, number>();
+  for (const it of items) {
+    const a = norm(it.artist);
+    if (a) artistFreq.set(a, (artistFreq.get(a) || 0) + 1);
+  }
+  const score = (it: SearchResultItem) => {
+    const a = norm(it.artist);
+    const freqBonus = Math.min(3, (artistFreq.get(a) || 0) - 1) * 25;
+    return scoreTrack(it, keyword, hint) + freqBonus;
+  };
+  return [...items].sort((a, b) => score(b) - score(a));
 }
 
 // ===== 搜索:所选平台并发,单平台失败不影响整体;全失败时报聚合错误 =====
