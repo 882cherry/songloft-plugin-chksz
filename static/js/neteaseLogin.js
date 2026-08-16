@@ -120,15 +120,17 @@ async function pollQrStatus() {
   }
 }
 
-// ===== 网页登录:手机号 + 密码,登录成功后自动保存 Cookie =====
+// ===== 网页登录:官方 URS 组件(手机验证码 + 手机密码,自带滑块/易盾验证) =====
+let ursInstance = null
+let ursLoading = null
+let ursCreating = false
+
 function openWebSheet() {
   el('wyWebBackdrop').style.display = 'block'
   requestAnimationFrame(() => el('wyWebSheet').classList.add('show'))
   setTimeout(() => el('wyWebSheet').classList.add('show'), 60)
-  el('wyWebStatus').textContent = ''
-  el('wyWebStatus').className = 'dialog-status'
-  el('wyPassword').value = ''
-  el('wyWebSaveBtn').disabled = false
+  setWebStatus('正在加载网易云官方登录组件…')
+  initOfficialWebLogin()
 }
 
 function closeWebSheet() {
@@ -136,35 +138,99 @@ function closeWebSheet() {
   el('wyWebSheet').classList.remove('show')
 }
 
-async function submitWebLogin() {
-  const phone = el('wyPhone').value.trim()
-  const countrycode = el('wyPhoneCountry').value
-  const password = el('wyPassword').value
+function setWebStatus(msg, kind) {
   const st = el('wyWebStatus')
-  const btn = el('wyWebSaveBtn')
-  if (!phone || !password) {
-    st.textContent = '请输入手机号和密码'
-    st.className = 'dialog-status err'
-    return
+  if (st) {
+    st.textContent = msg || ''
+    st.className = 'dialog-status' + (kind === 'err' ? ' err' : '') + (kind === 'ok' ? ' ok' : '')
   }
-  btn.disabled = true
-  st.textContent = '登录中，正在自动获取 Cookie…'
-  st.className = 'dialog-status'
-  try {
-    const d = await api('api/netease/login/cellphone', {
-      method: 'POST',
-      body: JSON.stringify({ phone, countrycode, password }),
+}
+
+function loadUrsSdk() {
+  if (!ursLoading) {
+    ursLoading = new Promise((resolve, reject) => {
+      if (window.URS) { resolve(window.URS); return }
+      const script = document.createElement('script')
+      script.src = 'https://urswebzj.nosdn.127.net/webzj_cdn101/message.js'
+      script.onload = () => window.URS ? resolve(window.URS) : reject(new Error('网易云登录组件加载失败'))
+      script.onerror = () => reject(new Error('网易云登录组件加载失败'))
+      document.head.appendChild(script)
     })
-    if (!d || !d.ok) throw new Error((d && d.error) || '登录失败')
-    closeWebSheet()
+  }
+  return ursLoading
+}
+
+async function submitOfficialWebLogin(msg) {
+  setWebStatus('官方登录成功，正在同步登录状态…')
+  try {
+    const d = await api('api/netease/login/urs', {
+      method: 'POST',
+      body: JSON.stringify({ urls: (msg && msg.nextUrls) || [] }),
+    })
+    if (!d || !d.ok) throw new Error((d && d.error) || '登录回写失败')
+    setWebStatus('登录成功 ✓', 'ok')
     refreshNeteaseStatus()
     refreshWyAfterLogin()
     snackbar('网易云登录成功')
+    setTimeout(closeWebSheet, 500)
   } catch (e) {
-    btn.disabled = false
-    st.textContent = '登录失败：' + (e.message || e)
-    st.className = 'dialog-status err'
+    setWebStatus('登录组件已通过，但同步 Cookie 失败：' + (e.message || e) + '；请改用 Cookie 导入粘贴 MUSIC_U', 'err')
   }
+}
+
+function initOfficialWebLogin() {
+  const box = el('wyWebUrsBox')
+  if (!box) return
+  if (ursInstance || ursCreating) {
+    setWebStatus('请使用手机验证码登录，或切换到密码登录')
+    return
+  }
+  ursCreating = true
+  box.innerHTML = ''
+  loadUrsSdk()
+    .then((URS) => {
+      if (!el('wyWebUrsBox')) return
+      setWebStatus('请使用手机验证码登录，或切换到密码登录')
+      ursCreating = false
+      ursInstance = new URS({
+        newCDN: 1,
+        version: 4,
+        product: 'music',
+        promark: 'KGxdbOk',
+        host: 'music.163.com',
+        page: 'login',
+        single: 1,
+        needMobileLogin: 1,
+        mobileFirst: 1,
+        uniteLogin: { isItl: 1, loginTxt: '登录' },
+        includeBox: box,
+        aiCapBarHeight: 40,
+        aiCapPadding: 10,
+        mobilePlaceholder: { mobile: '请输入手机号', sms2: '请输入验证码' },
+        smsLoginFirst: 1,
+        uniteLoginTermsList: [],
+        logincb: (username, isOther, msg) => submitOfficialWebLogin(msg),
+        renderOk: () => setWebStatus('请使用手机验证码登录，或切换到密码登录'),
+        initError: (err) => setWebStatus('官方登录组件初始化失败：' + ((err && (err.errMsg || err.msg)) || '未知错误') + '；请改用扫码或 Cookie 导入', 'err'),
+        chromeCookieError: () => setWebStatus('浏览器阻止了第三方 Cookie：组件仍可登录，登录后插件会从服务端同步 Cookie'),
+      })
+    })
+    .catch((e) => {
+      ursCreating = false
+      setWebStatus((e.message || '网易云登录组件加载失败') + '；请改用扫码或 Cookie 导入', 'err')
+    })
+}
+
+function reloadWebLogin() {
+  if (!el('wyWebUrsBox')) return
+  setWebStatus('正在重新加载网易云官方登录组件…')
+  if (ursInstance && typeof ursInstance.closeIframe === 'function') {
+    try { ursInstance.closeIframe() } catch (e) { /* ignore */ }
+  }
+  ursInstance = null
+  const box = el('wyWebUrsBox')
+  box.innerHTML = ''
+  initOfficialWebLogin()
 }
 
 // ===== Cookie 导入(独立于网页登录) =====
@@ -229,10 +295,7 @@ export function initNeteaseLogin() {
   el('wyWebLoginBtn').addEventListener('click', openWebSheet)
   el('wyWebCancelBtn').addEventListener('click', closeWebSheet)
   el('wyWebBackdrop').addEventListener('click', closeWebSheet)
-  el('wyWebSaveBtn').addEventListener('click', submitWebLogin)
-  el('wyPassword').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitWebLogin()
-  })
+  el('wyWebReloadBtn').addEventListener('click', reloadWebLogin)
 
   el('wyCookieLoginBtn').addEventListener('click', openCookieSheet)
   el('wyCookieCancelBtn').addEventListener('click', closeCookieSheet)

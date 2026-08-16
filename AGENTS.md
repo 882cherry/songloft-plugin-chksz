@@ -56,7 +56,8 @@ npm run dev              # 开发模式
 | `GET/POST /api/settings` | 插件设置：api_key / quality(128k/320k/flac) / platforms / 网易云登录状态 |
 | `GET /api/netease/login/qr` | 获取网易云扫码登录 key 与登录 URL |
 | `GET /api/netease/login/qr/check` | 轮询扫码状态；803 成功后自动保存 MUSIC_U Cookie |
-| `POST /api/netease/login/cellphone` | 网页登录 API（手机号+密码，EAPI，成功后自动保存 Cookie）；前端网页登录使用此表单 |
+| `POST /api/netease/login/cellphone` | 备用手机号+密码登录 API（EAPI，易触发风控；新版前端不再使用） |
+| `POST /api/netease/login/urs` | 官方 URS 网页登录成功回写：服务端请求 `nextUrls` 抓取 MUSIC_U 并保存 |
 | `POST /api/netease/login/cookie` | Cookie 导入：验证 MUSIC_U 并保存（独立于网页登录） |
 | `POST /api/netease/logout` | 退出网易云登录 |
 | `POST /api/import` | 导入宿主曲库（去重键 `chksz_{platform}_{id/mid}`，返回歌曲 id） |
@@ -100,7 +101,7 @@ npm run dev              # 开发模式
 - 宿主 `SongloftPlugin` 桥（getAuthToken/apiGet/apiPost/...）在 iframe 加载后注入，前端初始化需容错（模块 try/catch 隔离，见 `app.js`）
 
 ### 7. 前端模块约定
-- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台多选下拉框；`browse.js` 首页平台标签+歌单详情操作（网易云登录后含个人歌单模块）；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`neteaseLogin.js` 网易云扫码/手机号网页/Cookie 登录；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
+- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台多选下拉框；`browse.js` 首页平台标签+歌单详情操作（网易云登录后含个人歌单模块）；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`neteaseLogin.js` 网易云扫码/官方 URS 网页组件（手机验证码+手机密码）/Cookie 登录；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
 - 收藏歌单走宿主 API：`GET/POST /api/v1/playlists`（创建需 `{name, type:"normal"}`）、`POST /api/v1/playlists/{id}/songs`（`{song_ids:[..]}`，服务端去重）、`GET /api/v1/playlists/{id}/song-ids`
 - 未配置 API Key 时点击搜索 → 自动打开配置弹窗（`openConfig`）
 

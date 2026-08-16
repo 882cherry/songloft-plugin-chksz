@@ -663,6 +663,77 @@ router.post('/api/netease/login/cellphone', async (req) => {
   }
 });
 
+// 官方网页登录(URS SDK)成功后,nextUrls 会在浏览器侧种 Cookie;
+// 插件后端没有浏览器 Cookie,这里服务端再请求一遍 nextUrls 并抓取 set-cookie。
+function isAllowedWyLoginUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h === 'music.163.com' || h.endsWith('.music.163.com') ||
+      h === 'interface.music.163.com' || h === 'dl.reg.163.com' || h.endsWith('.reg.163.com');
+  } catch {
+    return false;
+  }
+}
+
+async function fetchWyNextUrl(url: string): Promise<string> {
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('网易云登录回写请求超时')), REQ_TIMEOUT_MS),
+  );
+  const resp: any = await Promise.race([
+    fetch(url, {
+      headers: {
+        'User-Agent': BROWSE_UA,
+        'Referer': 'https://music.163.com/',
+        'Accept': '*/*',
+      },
+      redirect: 'follow',
+    }),
+    timeoutPromise,
+  ]);
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const setCookie = extractSetCookie(resp);
+  try { await resp.text(); } catch { /* 忽略 body 读取错误 */ }
+  return setCookie;
+}
+
+// 官方网页登录(手机验证码 / 手机密码)成功回调:回写 MUSIC_U 并保存 profile
+router.post('/api/netease/login/urs', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const urls: string[] = (Array.isArray(body.urls) ? body.urls : [])
+    .map(String)
+    .map((u) => (/^\/\//.test(u) ? 'https:' + u : u))
+    .filter((u) => /^https?:/i.test(u) && isAllowedWyLoginUrl(u));
+  if (!urls.length) return jsonResponse({ error: '官方登录成功,但未返回登录回写地址,请改用扫码或 Cookie 导入' }, 502);
+
+  const cookieParts: string[] = [];
+  try {
+    for (const url of urls) {
+      const setCookie = await fetchWyNextUrl(url);
+      if (setCookie) cookieParts.push(setCookie);
+    }
+  } catch (e: any) {
+    return jsonResponse({ error: '网易云登录回写失败: ' + String(e?.message || e) }, 502);
+  }
+
+  const combined = cookieParts.join('; ');
+  const cleanCookie = neteaseCookieHeader(combined);
+  if (!extractCookieValue(cleanCookie, 'MUSIC_U')) {
+    return jsonResponse({ error: '官方登录未返回 MUSIC_U,请改用扫码或 Cookie 导入' }, 502);
+  }
+  try {
+    const profile = await fetchNeteaseAccountProfile(cleanCookie);
+    if (!profile) return jsonResponse({ error: '官方登录 Cookie 无法验证,请改用扫码或 Cookie 导入' }, 502);
+    await saveNeteaseLogin(cleanCookie, {
+      profile,
+      nickname: profile?.nickname || '',
+      avatarUrl: profile?.avatarUrl || '',
+    });
+    return jsonResponse({ ok: true, logged_in: true, profile });
+  } catch (e: any) {
+    return jsonResponse({ error: '网易云登录验证失败: ' + String(e?.message || e) }, 502);
+  }
+});
+
 // 网页登录 / Cookie 导入:验证 MUSIC_U 并保存
 function normalizeWYCookie(input: string): string {
   let s = String(input || '').trim();
