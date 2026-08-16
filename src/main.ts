@@ -50,7 +50,7 @@ function cleanLyricSources(arr: unknown[]): string[] {
 }
 
 // ===== 配置 =====
-async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[]; lyricSources: string[]; lyricsEnabled: boolean }> {
+async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[]; lyricSources: string[]; lyricsEnabled: boolean; lyricForceSource: string }> {
   const apiKey = ((await songloft.storage.get('api_key')) as string) || '';
   const quality = ((await songloft.storage.get('quality')) as string) || 'flac';
   let platforms: string[] = [...ALL_PLATFORMS];
@@ -78,7 +78,8 @@ async function getConfig(): Promise<{ apiKey: string; quality: string; platforms
     /* 非法配置回退全部 */
   }
   const lyricsEnabled = (await songloft.storage.get('lyrics_enabled')) !== false; // 默认开启
-  return { apiKey, quality, platforms, lyricSources, lyricsEnabled };
+  const lyricForceSource = String((await songloft.storage.get('lyric_force_source')) || '').trim();
+  return { apiKey, quality, platforms, lyricSources, lyricsEnabled, lyricForceSource };
 }
 
 // ===== 网易云登录(扫码 / Cookie 导入) =====
@@ -498,7 +499,7 @@ router.post('/api/music/url', createMusicUrlHandler({ resolveUrl, fallbackSearch
 
 // 插件设置(API Key / 音质 / 歌词接口优先级 / 歌词开关)
 router.get('/api/settings', async () => {
-  const { apiKey, quality, platforms, lyricSources, lyricsEnabled } = await getConfig();
+  const { apiKey, quality, platforms, lyricSources, lyricsEnabled, lyricForceSource } = await getConfig();
   const wyProfile = await getNeteaseProfile();
   return jsonResponse({
     api_key_set: !!apiKey,
@@ -507,6 +508,7 @@ router.get('/api/settings', async () => {
     platforms,
     lyric_sources: lyricSources,
     lyrics_enabled: lyricsEnabled,
+    lyric_force_source: lyricForceSource,
     netease_login: {
       logged_in: !!(await getNeteaseCookie()),
       nickname: wyProfile?.nickname || wyProfile?.profile?.nickname || '',
@@ -533,6 +535,10 @@ router.post('/api/settings', async (req) => {
   }
   if (typeof body.lyrics_enabled === 'boolean') {
     await songloft.storage.set('lyrics_enabled', body.lyrics_enabled);
+  }
+  if (typeof body.lyric_force_source === 'string') {
+    const v = body.lyric_force_source.trim();
+    await songloft.storage.set('lyric_force_source', ALL_LYRIC_SOURCES.includes(v) ? v : '');
   }
   return jsonResponse({ ok: true });
 });
@@ -1141,10 +1147,11 @@ function isLrcText(text: string): boolean {
 // 说明:宿主播放器对 LRC 同步歌词支持最好,因此多接口时优先返回带时间轴的 LRC;
 // 若前面接口只返回纯文本,先记为兜底,继续尝试后续接口找 LRC,最后才用纯文本。
 async function fetchLyric(q: LyricQuery, source?: string): Promise<LyricResult> {
-  const { lyricSources } = await getConfig();
-  // 指定了 source 则只试该接口;否则按配置优先级依次尝试
-  const tries = source
-    ? [source]
+  const { lyricSources, lyricForceSource } = await getConfig();
+  // 指定了 source 则只试该接口;否则若设置了“强制接口”则只试它;再否则按配置优先级依次尝试
+  const effectiveSource = source || (lyricForceSource && ALL_LYRIC_SOURCES.includes(lyricForceSource) ? lyricForceSource : '');
+  const tries = effectiveSource
+    ? [effectiveSource]
     : (lyricSources.length ? lyricSources : DEFAULT_LYRIC_SOURCES);
 
   let lastErr = '';
@@ -1290,6 +1297,7 @@ router.post('/api/lyric/search', async (req) => {
 });
 
 // 前端:为指定歌曲按指定接口(或按优先级)重新获取歌词
+// 可选 set_force=true 时会把该接口设为“强制接口”,供宿主播放器下次重新抓取时使用
 router.post('/api/lyric/fetch', async (req) => {
   const body = JSON.parse((req.body as string) || '{}');
   const item = body.song || body;
@@ -1307,7 +1315,12 @@ router.post('/api/lyric/fetch', async (req) => {
       duration: Number(item.duration || body.duration || 0) || 0,
       source_data: sourceData,
     }, specificSource || undefined);
-    return jsonResponse({ ...result, ok: true });
+    // 可选:把本次指定接口同步为“强制接口”,宿主播放器重新抓取歌词时优先使用
+    if (body.set_force === true) {
+      const force = specificSource && ALL_LYRIC_SOURCES.includes(specificSource) ? specificSource : '';
+      await songloft.storage.set('lyric_force_source', force);
+    }
+    return jsonResponse({ ...result, ok: true, force_source: body.set_force === true ? (specificSource || '') : undefined });
   } catch (e: any) {
     return jsonResponse({ error: String(e?.message || e) }, 404);
   }
@@ -1315,12 +1328,13 @@ router.post('/api/lyric/fetch', async (req) => {
 
 // 兼容官方歌词插件的配置/测试接口(便于前端与外部工具使用)
 router.get('/config', async () => {
-  const { lyricsEnabled, lyricSources } = await getConfig();
+  const { lyricsEnabled, lyricSources, lyricForceSource } = await getConfig();
   return jsonResponse({
     enabled: lyricsEnabled,
     provider: lyricSources[0] || 'lrclib',
     customUrl: '',
     lyric_sources: lyricSources,
+    lyric_force_source: lyricForceSource,
   });
 });
 
@@ -1334,10 +1348,14 @@ router.put('/config', async (req) => {
     const clean = cleanLyricSources(body.lyric_sources);
     if (clean.length) await songloft.storage.set('lyric_sources', JSON.stringify(clean));
   }
-  const { lyricsEnabled, lyricSources } = await getConfig();
+  if (typeof body.lyric_force_source === 'string') {
+    const v = body.lyric_force_source.trim();
+    await songloft.storage.set('lyric_force_source', ALL_LYRIC_SOURCES.includes(v) ? v : '');
+  }
+  const { lyricsEnabled, lyricSources, lyricForceSource } = await getConfig();
   return jsonResponse({
     status: 'ok',
-    config: { enabled: lyricsEnabled, provider: lyricSources[0] || 'lrclib', customUrl: '', lyric_sources: lyricSources },
+    config: { enabled: lyricsEnabled, provider: lyricSources[0] || 'lrclib', customUrl: '', lyric_sources: lyricSources, lyric_force_source: lyricForceSource },
   });
 });
 

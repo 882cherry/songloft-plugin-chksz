@@ -65,22 +65,35 @@ async function loadSourceOptions() {
     const ordered = order.map((c) => LYRIC_SOURCES.find((s) => s.code === c)).filter(Boolean)
     // 补充可能有但未启用的接口
     LYRIC_SOURCES.forEach((s) => { if (!ordered.some((o) => o.code === s.code)) ordered.push(s) })
+
+    // 第一项:自动(按优先级)
+    const auto = document.createElement('option')
+    auto.value = ''
+    auto.textContent = '自动(按优先级)'
+    sel.appendChild(auto)
+
     ordered.forEach((s) => {
       const opt = document.createElement('option')
       opt.value = s.code
       opt.textContent = s.name
       sel.appendChild(opt)
     })
-    sel.value = (order[0] && LYRIC_SOURCES.some((s) => s.code === order[0])) ? order[0] : 'lrclib'
+    // 若已设置强制接口,默认选中它;否则默认自动
+    const force = (data && data.lyric_force_source) || ''
+    sel.value = force && LYRIC_SOURCES.some((s) => s.code === force) ? force : ''
   } catch (e) {
     // 失败时用默认
+    const auto = document.createElement('option')
+    auto.value = ''
+    auto.textContent = '自动(按优先级)'
+    sel.appendChild(auto)
     LYRIC_SOURCES.forEach((s) => {
       const opt = document.createElement('option')
       opt.value = s.code
       opt.textContent = s.name
       sel.appendChild(opt)
     })
-    sel.value = 'lrclib'
+    sel.value = ''
   }
 }
 
@@ -253,6 +266,8 @@ function fetchForCurrentSong(source) {
         source_data: currentSong.source_data || undefined,
       },
       source: src || undefined,
+      // 同步为“强制接口”:宿主播放器下次重新抓取歌词时也使用该接口
+      set_force: true,
     }),
   })
     .then((data) => {
@@ -264,9 +279,11 @@ function fetchForCurrentSong(source) {
       currentSong.title = data.title || currentSong.title
       currentSong.artist = data.artist || currentSong.artist
       currentSong.album = data.album || currentSong.album
-      st.textContent = '已通过 ' + srcName(data.source || src) + ' 获取歌词(' + parseLrc(data.lyric).length + ' 行)'
+      const used = data.source || src
+      st.textContent = '已通过 ' + srcName(used) + ' 获取歌词(' + parseLrc(data.lyric).length + ' 行)' +
+        (src ? '，已设为播放器重新抓取接口' : '，已恢复自动优先级')
       renderLyricView(data)
-      snackbar('已获取歌词')
+      snackbar('已获取歌词' + (src ? '，并设为重新抓取接口' : ''))
     })
     .catch((e) => {
       st.textContent = '获取失败:' + (e.message || e)
@@ -275,6 +292,7 @@ function fetchForCurrentSong(source) {
 }
 
 function srcName(code) {
+  if (!code) return '自动(按优先级)'
   return (LYRIC_SOURCES.find((s) => s.code === code) || {}).name || code
 }
 
@@ -295,10 +313,6 @@ export function initLyric() {
 
   const refetchBtn = el('lyricRefetchBtn')
   if (refetchBtn) refetchBtn.addEventListener('click', () => fetchForCurrentSong(el('lyricSource').value))
-
-  // 顶部「搜索歌词」按钮(搜索栏)
-  const searchLyricBtn = el('searchLyricBtn')
-  if (searchLyricBtn) searchLyricBtn.addEventListener('click', openLyricSearch)
 
   // 顶部「当前播放歌词」按钮(搜索栏)
   const currentLyricBtn = el('currentLyricBtn')
