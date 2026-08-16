@@ -39,8 +39,18 @@ const QK_SIZE: Record<string, string> = { '128k': '128k', '320k': '320k', flac: 
 // ===== 平台定义(前端搜索多选,与 static/js/search.js 的 PLATFORM_OPTIONS 对应)=====
 const ALL_PLATFORMS = ['wy', 'tx', 'kg']; // wy=网易云 tx=QQ kg=酷狗
 
+// ===== 歌词接口定义(前端排序/勾选用,与 static/js/lyric.js 的 LYRIC_SOURCES 对应)=====
+const ALL_LYRIC_SOURCES = ['lrclib', 'wy', 'tx', 'kg']; // lrclib=LRCLIB 网易云 QQ 酷狗
+const DEFAULT_LYRIC_SOURCES = ['lrclib', 'wy', 'tx', 'kg'];
+
+function cleanLyricSources(arr: unknown[]): string[] {
+  const clean = (Array.isArray(arr) ? arr : []).map(String).filter((s) => ALL_LYRIC_SOURCES.includes(s));
+  // 去重保持顺序
+  return [...new Set(clean)];
+}
+
 // ===== 配置 =====
-async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[] }> {
+async function getConfig(): Promise<{ apiKey: string; quality: string; platforms: string[]; lyricSources: string[] }> {
   const apiKey = ((await songloft.storage.get('api_key')) as string) || '';
   const quality = ((await songloft.storage.get('quality')) as string) || 'flac';
   let platforms: string[] = [...ALL_PLATFORMS];
@@ -56,7 +66,18 @@ async function getConfig(): Promise<{ apiKey: string; quality: string; platforms
   } catch {
     /* 非法配置回退全选 */
   }
-  return { apiKey, quality, platforms };
+  let lyricSources: string[] = [...DEFAULT_LYRIC_SOURCES];
+  try {
+    const raw = (await songloft.storage.get('lyric_sources')) as string;
+    if (raw) {
+      const arr = JSON.parse(raw);
+      const clean = cleanLyricSources(arr);
+      if (clean.length) lyricSources = clean;
+    }
+  } catch {
+    /* 非法配置回退全部 */
+  }
+  return { apiKey, quality, platforms, lyricSources };
 }
 
 // ===== 网易云登录(扫码 / Cookie 导入) =====
@@ -474,15 +495,16 @@ router.post('/api/search/select', async (req) => {
 });
 router.post('/api/music/url', createMusicUrlHandler({ resolveUrl, fallbackSearch }));
 
-// 插件设置(API Key / 音质)
+// 插件设置(API Key / 音质 / 歌词接口优先级)
 router.get('/api/settings', async () => {
-  const { apiKey, quality, platforms } = await getConfig();
+  const { apiKey, quality, platforms, lyricSources } = await getConfig();
   const wyProfile = await getNeteaseProfile();
   return jsonResponse({
     api_key_set: !!apiKey,
     api_key_mask: apiKey ? `***${apiKey.slice(-4)}` : '',
     quality,
     platforms,
+    lyric_sources: lyricSources,
     netease_login: {
       logged_in: !!(await getNeteaseCookie()),
       nickname: wyProfile?.nickname || wyProfile?.profile?.nickname || '',
@@ -502,6 +524,10 @@ router.post('/api/settings', async (req) => {
   if (Array.isArray(body.platforms)) {
     const clean = body.platforms.map(String).filter((p) => ALL_PLATFORMS.includes(p));
     if (clean.length) await songloft.storage.set('platforms', JSON.stringify(clean));
+  }
+  if (Array.isArray(body.lyric_sources)) {
+    const clean = cleanLyricSources(body.lyric_sources);
+    if (clean.length) await songloft.storage.set('lyric_sources', JSON.stringify(clean));
   }
   return jsonResponse({ ok: true });
 });
@@ -848,6 +874,412 @@ async function browseFetch(url: string, opts?: { method?: string; body?: string;
     throw new Error('响应不是 JSON: ' + (e?.message || e));
   }
 }
+
+/** 同 browseFetch,但按纯文本读取(用于酷狗 krc 等纯文本接口) */
+async function browseFetchText(url: string, opts?: { referer?: string; headers?: Record<string, string> }): Promise<string> {
+  const headers: Record<string, string> = { 'User-Agent': BROWSE_UA };
+  if (opts?.headers) Object.assign(headers, opts.headers);
+  if (opts?.referer) headers['Referer'] = opts.referer;
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('资源请求超时')), BROWSE_TIMEOUT_MS),
+  );
+  let resp: any;
+  try {
+    resp = await Promise.race([
+      fetch(url, { headers }),
+      timeoutPromise,
+    ]);
+  } catch (e: any) {
+    throw new Error('网络请求失败: ' + (e?.message || e));
+  }
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return await resp.text();
+}
+
+
+// ===== 歌词搜索与获取(多接口 + 优先级) =====
+// 参考 https://github.com/Ryderwe/Sollin-Music-Desktop 的多源歌词思路:
+//   - lrclib: https://lrclib.net (聚合公开 LRC / 纯文本歌词,按歌名+歌手搜索)
+//   - wy:  网易云网页公开接口(搜索歌曲 → 取歌词)
+//   - tx:  QQ音乐网页公开接口(搜索歌曲 → 取歌词)
+//   - kg:  酷狗网页公开接口(搜索歌曲 → 取歌词)
+// 插件通过 songloft.lyrics.registerProvider() 注册为宿主歌词提供者,
+// 宿主在歌曲无歌词时调用本插件 /lyric-search 端点自动获取。
+const LYRIC_SOURCE_NAMES: Record<string, string> = {
+  lrclib: 'LRCLIB',
+  wy: '网易云',
+  tx: 'QQ音乐',
+  kg: '酷狗',
+};
+
+type LyricQuery = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  duration?: number;
+  platform?: string;
+  source_data?: Record<string, unknown>;
+};
+
+type LyricResult = {
+  lyric: string;
+  source: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  matched?: boolean;
+};
+
+/** 判断一段文本是不是「有效歌词」——太短(<20字符)或只有元信息时视为无效 */
+function isValidLyric(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const contentLines = t.split('\n').filter((l) => l.trim() && !/^\[\w+:/.test(l.trim()) && !/^\[(ar|ti|al|by|offset|total|hash|sign|qq|id):/i.test(l.trim()));
+  return contentLines.length >= 2;
+}
+
+function lrcOrPlain(plain: string, synced: string): string {
+  if (synced && isValidLyric(synced)) return synced;
+  if (plain && isValidLyric(plain)) return plain;
+  return synced || plain || '';
+}
+
+function combineLyric(primary: string, translation?: string): string {
+  const a = String(primary || '').trim();
+  const b = String(translation || '').trim();
+  if (!a) return b;
+  if (!b || b === a) return a;
+  return a + '\n' + b;
+}
+
+// ---- lrclib:无需歌曲 id,按歌名/歌手搜索 ----
+async function lyricFromLrclib(q: LyricQuery): Promise<LyricResult> {
+  const title = String(q.title || '').trim();
+  const artist = String(q.artist || '').trim();
+  const keyword = [title, artist].filter(Boolean).join(' ');
+  if (!keyword) throw new Error('缺少歌名/歌手');
+
+  const params = new URLSearchParams();
+  if (title) params.set('track_name', title);
+  if (artist) params.set('artist_name', artist);
+  params.set('q', keyword);
+  const d = await browseFetch('https://lrclib.net/api/search?' + params.toString(), {
+    referer: 'https://lrclib.net/',
+  });
+  const list: any[] = Array.isArray(d) ? d : [];
+  if (!list.length) throw new Error('LRCLIB 未找到歌词');
+
+  // 优先挑同步歌词(syncedLyrics),其次纯文本
+  const exact = list.find((it) =>
+    (!title || (it.trackName || '').toLowerCase() === title.toLowerCase()) &&
+    (!artist || (it.artistName || '').toLowerCase() === artist.toLowerCase())
+  ) || list[0];
+
+  const text = lrcOrPlain(exact.plainLyrics, exact.syncedLyrics);
+  if (!text) throw new Error('LRCLIB 无有效歌词');
+  return {
+    lyric: text,
+    source: 'lrclib',
+    title: exact.trackName || exact.name || title,
+    artist: exact.artistName || artist,
+    album: exact.albumName || q.album || '',
+    matched: !!exact,
+  };
+}
+
+// ---- 网易云:搜索歌曲 → 取歌词(公开接口,无需 API Key) ----
+async function lyricFromWy(q: LyricQuery): Promise<LyricResult> {
+  const keyword = [q.title, q.artist].filter(Boolean).join(' ');
+  if (!keyword) throw new Error('缺少歌名/歌手');
+
+  // 若已具备网易云 id,直接取歌词,跳过搜索
+  let songId = q.source_data?.id ? String(q.source_data.id) : '';
+  let matchedTitle = q.title || '';
+  let matchedArtist = q.artist || '';
+  if (!songId) {
+    const search = await browseFetch(
+      'https://music.163.com/api/search/get/web?s=' + encodeURIComponent(keyword) + '&type=1&limit=5',
+      { referer: 'https://music.163.com/' },
+    );
+    const songs: any[] = search?.result?.songs || [];
+    if (!songs.length) throw new Error('网易云未找到歌曲');
+    const hit = q.source_data?.platform === 'wy' ? songs[0] : rankSongByTitle(songs, q);
+    songId = String(hit.id || '');
+    matchedTitle = hit.name || q.title || '';
+    matchedArtist = (hit.artists || []).map((a: any) => a.name).join('/') || q.artist || '';
+  }
+
+  const d = await browseFetch(
+    'https://music.163.com/api/song/lyric?id=' + encodeURIComponent(songId) + '&lv=-1&kv=-1&tv=-1',
+    { referer: 'https://music.163.com/' },
+  );
+  const text = combineLyric(d?.lrc?.lyric || '', d?.tlyric?.lyric || '');
+  if (!isValidLyric(text)) throw new Error('网易云歌词为空');
+  return { lyric: text, source: 'wy', title: matchedTitle, artist: matchedArtist, matched: true };
+}
+
+/** 按标题精确度给搜索结果打分,优先原唱/标题完全一致 */
+function rankSongByTitle(songs: any[], q: LyricQuery): any {
+  const t = String(q.title || '').trim().toLowerCase();
+  return [...songs].sort((a, b) => {
+    const at = String(a.name || '').toLowerCase();
+    const bt = String(b.name || '').toLowerCase();
+    const ac = at === t ? 1 : at.includes(t) || t.includes(at) ? 0 : -1;
+    const bc = bt === t ? 1 : bt.includes(t) || t.includes(bt) ? 0 : -1;
+    return bc - ac;
+  })[0];
+}
+
+// ---- QQ音乐:搜索歌曲 → 取歌词(公开接口) ----
+async function lyricFromTx(q: LyricQuery): Promise<LyricResult> {
+  const keyword = [q.title, q.artist].filter(Boolean).join(' ');
+  if (!keyword) throw new Error('缺少歌名/歌手');
+
+  let mid = q.source_data?.mid ? String(q.source_data.mid) : '';
+  let matchedTitle = q.title || '';
+  let matchedArtist = q.artist || '';
+  if (!mid) {
+    const search = await browseFetch(
+      'https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&p=1&n=5&w=' + encodeURIComponent(keyword),
+      { referer: 'https://y.qq.com/' },
+    );
+    const songs: any[] = search?.data?.song?.list || [];
+    if (!songs.length) throw new Error('QQ音乐未找到歌曲');
+    const hit = rankTxSongs(songs, q);
+    mid = String(hit.songmid || '');
+    matchedTitle = hit.songname || hit.name || q.title || '';
+    matchedArtist = (hit.singer || []).map((s: any) => s.name).join('/') || q.artist || '';
+  }
+
+  const d = await browseFetch(
+    'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=' + encodeURIComponent(mid) + '&format=json&nobase64=1',
+    { referer: 'https://y.qq.com/' },
+  );
+  // nobase64=1 时 lyric 已是明文 LRC;部分接口仍返回 base64(旧接口),兜底解码
+  let text = String(d?.lyric || '');
+  if (!text && d?.lyric) {
+    try { text = new TextDecoder('utf-8').decode(base64ToBytes(d.lyric)); } catch { /* ignore */ }
+  }
+  if (!isValidLyric(text)) throw new Error('QQ音乐歌词为空');
+  return { lyric: text, source: 'tx', title: matchedTitle, artist: matchedArtist, matched: true };
+}
+
+function rankTxSongs(songs: any[], q: LyricQuery): any {
+  const t = String(q.title || '').trim().toLowerCase();
+  return [...songs].sort((a, b) => {
+    const at = String(a.songname || a.name || '').toLowerCase();
+    const bt = String(b.songname || b.name || '').toLowerCase();
+    const ac = at === t ? 1 : at.includes(t) || t.includes(at) ? 0 : -1;
+    const bc = bt === t ? 1 : bt.includes(t) || t.includes(bt) ? 0 : -1;
+    return bc - ac;
+  })[0];
+}
+
+// ---- 酷狗:搜索歌曲 → 取歌词(公开接口) ----
+async function lyricFromKg(q: LyricQuery): Promise<LyricResult> {
+  const keyword = [q.title, q.artist].filter(Boolean).join(' ');
+  if (!keyword) throw new Error('缺少歌名/歌手');
+
+  let hash = q.source_data?.id ? String(q.source_data.id) : '';
+  let matchedTitle = q.title || '';
+  let matchedArtist = q.artist || '';
+  if (!hash) {
+    const search = await browseFetch(
+      'http://mobilecdn.kugou.com/api/v3/search/song?format=json&page=1&pagesize=5&keyword=' + encodeURIComponent(keyword),
+      { referer: 'http://m.kugou.com/' },
+    );
+    const songs: any[] = search?.data?.info || [];
+    if (!songs.length) throw new Error('酷狗未找到歌曲');
+    const hit = rankKgSongs(songs, q);
+    hash = String(hit.hash || '');
+    matchedTitle = hit.songname || q.title || '';
+    matchedArtist = (hit.singername || '').replace(/独立|独立音乐人/g, '') || q.artist || '';
+  }
+
+  const lyric = await browseFetchText(
+    'http://m.kugou.com/app/i/krc.php?cmd=100&hash=' + encodeURIComponent(hash) + '&timelength=' + encodeURIComponent(String(Number(q.duration) * 1000 || '')),
+    { referer: 'http://m.kugou.com/', headers: { 'Accept': 'text/plain, */*' } },
+  ).catch(() => '');
+
+  if (!isValidLyric(lyric)) throw new Error('酷狗歌词为空');
+  return { lyric, source: 'kg', title: matchedTitle, artist: matchedArtist, matched: true };
+}
+
+function rankKgSongs(songs: any[], q: LyricQuery): any {
+  const t = String(q.title || '').trim().toLowerCase();
+  return [...songs].sort((a, b) => {
+    const at = String(a.songname || a.name || '').toLowerCase();
+    const bt = String(b.songname || b.name || '').toLowerCase();
+    const ac = at === t ? 1 : at.includes(t) || t.includes(at) ? 0 : -1;
+    const bc = bt === t ? 1 : bt.includes(t) || t.includes(bt) ? 0 : -1;
+    return bc - ac;
+  })[0];
+}
+
+// ---- 统一获取:按指定接口或优先级顺序尝试 ----
+async function fetchLyric(q: LyricQuery, source?: string): Promise<LyricResult> {
+  const { lyricSources } = await getConfig();
+  // 指定了 source 则只试该接口;否则按配置优先级依次尝试,首个成功即返回
+  const tries = source
+    ? [source]
+    : (lyricSources.length ? lyricSources : DEFAULT_LYRIC_SOURCES);
+
+  let lastErr = '';
+  for (const s of tries) {
+    try {
+      const r = await (async () => {
+        if (s === 'lrclib') return await lyricFromLrclib(q);
+        if (s === 'wy') return await lyricFromWy(q);
+        if (s === 'tx') return await lyricFromTx(q);
+        if (s === 'kg') return await lyricFromKg(q);
+        throw new Error('未知歌词接口: ' + s);
+      })();
+      if (r && r.lyric) return r;
+    } catch (e: any) {
+      lastErr = (lastErr ? lastErr + '; ' : '') + `${LYRIC_SOURCE_NAMES[s] || s}: ${e?.message || e}`;
+      songloft.log.warn(`[chksz] 歌词接口 ${s} 获取失败: ${e?.message || e}`);
+    }
+  }
+  throw new Error(lastErr || '所有歌词接口均未找到歌词');
+}
+
+/** 按歌名/歌手搜索多接口歌词,用于前端「搜索歌词」面板 */
+async function searchLyricsMulti(keyword: string): Promise<{ source: string; title: string; artist: string; album: string; preview: string; lyric: string }[]> {
+  const { lyricSources } = await getConfig();
+  const sources = lyricSources.length ? lyricSources : DEFAULT_LYRIC_SOURCES;
+  const results: { source: string; title: string; artist: string; album: string; preview: string; lyric: string }[] = [];
+  const tasks: Promise<void>[] = [];
+
+  for (const s of sources) {
+    tasks.push((async () => {
+      try {
+        const r = await fetchLyric({ title: keyword }, s);
+        if (r.lyric) {
+          results.push({
+            source: r.source || s,
+            title: r.title || '',
+            artist: r.artist || '',
+            album: r.album || '',
+            preview: r.lyric.slice(0, 150),
+            lyric: r.lyric,
+          });
+        }
+      } catch (e: any) {
+        songloft.log.warn(`[chksz] 歌词搜索 ${s} 失败: ${e?.message || e}`);
+      }
+    })());
+  }
+  await Promise.all(tasks);
+  return results;
+}
+
+/** base64 → bytes(用于 QQ 歌词旧接口返回 base64 的情况) */
+function base64ToBytes(b64: string): Uint8Array {
+  // QuickJS 环境没有 atob,用纯 JS 解码(兼容 SDK 提供的 Buffer)
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let str = String(b64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+  if (str.length % 4 === 1) str = str.slice(0, -1);
+  let out: number[] = [];
+  let buffer = 0, bits = 0;
+  for (let i = 0; i < str.length; i++) {
+    const c = chars.indexOf(str[i]);
+    if (c < 0) continue;
+    buffer = (buffer << 6) | c;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buffer >> bits) & 0xff);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+// ===== 歌词路由 =====
+
+// 宿主歌词提供者契约:歌曲无歌词时宿主 InvokeHTTP 调用本端点。
+// 支持 GET(query) 或 POST(JSON),字段:title/artist/album/duration/source_data(可选 JSON 字符串)。
+router.post('/lyric-search', async (req) => {
+  return await handleLyricSearch(req, false);
+});
+router.get('/lyric-search', async (req) => {
+  return await handleLyricSearch(req, true);
+});
+
+async function handleLyricSearch(req: HTTPRequest, isGet: boolean): Promise<HTTPResponse> {
+  let body: any = {};
+  if (isGet) {
+    const q = parseQuery(req.query || '');
+    body = { ...q };
+    if (body.source_data) {
+      try { body.source_data = JSON.parse(body.source_data); } catch { /* ignore */ }
+    }
+  } else {
+    try { body = JSON.parse((req.body as string) || '{}'); } catch { /* ignore */ }
+  }
+  const title = String(body.title || body.track_name || body.trackName || '').trim();
+  const artist = String(body.artist || body.artist_name || body.artistName || '').trim();
+  const album = String(body.album || body.album_name || body.albumName || '').trim();
+  const duration = Number(body.duration || 0) || 0;
+  const sourceData = (body.source_data && typeof body.source_data === 'object') ? body.source_data : undefined;
+  const specificSource = String(body.source || body.lyric_source || '').trim();
+  if (!title && !artist) {
+    return jsonResponse({ error: 'title or artist required' }, 400);
+  }
+
+  try {
+    const result = await fetchLyric({ title, artist, album, duration, source_data: sourceData }, specificSource || undefined);
+    return jsonResponse({
+      lyric: result.lyric,
+      lrc: result.lyric, // 兼容宿主可能期望的字段名
+      lyric_source: result.source,
+      lyricSource: result.source,
+      title: result.title || title,
+      artist: result.artist || artist,
+      album: result.album || album,
+      ok: true,
+    });
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 404);
+  }
+}
+
+// 前端「搜索歌词」:按关键词跨所有已启用接口搜索
+router.post('/api/lyric/search', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const keyword = String(body.keyword || '').trim();
+  if (!keyword) return jsonResponse({ error: 'keyword required' }, 400);
+  try {
+    const results = await searchLyricsMulti(keyword);
+    return jsonResponse({ results });
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 500);
+  }
+});
+
+// 前端:为指定歌曲按指定接口(或按优先级)重新获取歌词
+router.post('/api/lyric/fetch', async (req) => {
+  const body = JSON.parse((req.body as string) || '{}');
+  const item = body.song || body;
+  const title = String(item.title || body.title || '').trim();
+  const artist = String(item.artist || body.artist || '').trim();
+  if (!title && !artist) return jsonResponse({ error: 'title or artist required' }, 400);
+  const specificSource = String(body.source || body.lyric_source || '').trim();
+  let sourceData: Record<string, unknown> | undefined;
+  if (item.source_data && typeof item.source_data === 'object') sourceData = item.source_data as Record<string, unknown>;
+  try {
+    const result = await fetchLyric({
+      title,
+      artist,
+      album: String(item.album || body.album || '').trim(),
+      duration: Number(item.duration || body.duration || 0) || 0,
+      source_data: sourceData,
+    }, specificSource || undefined);
+    return jsonResponse({ ...result, ok: true });
+  } catch (e: any) {
+    return jsonResponse({ error: String(e?.message || e) }, 404);
+  }
+});
+
 
 // ---- 网易云:个人歌单(登录后) + 推荐歌单 + 排行榜 ----
 function mapWyBrowsePlaylist(p: any) {
@@ -1407,6 +1839,16 @@ router.post('/api/search/topone', async (req) => {
 // ===== 生命周期 =====
 async function onInit(): Promise<void> {
   songloft.log.info('[chksz] ChKSz 音源插件已加载');
+
+  // 注册为宿主歌词提供者:歌曲无歌词时宿主自动调 /lyric-search
+  try {
+    if (songloft.lyrics && typeof songloft.lyrics.registerProvider === 'function') {
+      songloft.lyrics.registerProvider();
+      songloft.log.info('[chksz] 已注册为歌词提供者');
+    }
+  } catch (e: any) {
+    songloft.log.warn(`[chksz] 注册歌词提供者失败: ${e?.message || e}`);
+  }
 
   // 向 miot 注册为外部搜索源候选(延迟 + 重试,规避启动竞态;miot 未安装时静默跳过)
   setTimeout(async () => {

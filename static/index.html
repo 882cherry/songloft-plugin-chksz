@@ -295,6 +295,35 @@
         }
         .snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+        /* ===== 歌词 ===== */
+        .lyric-source-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+        .lyric-source-row {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 10px; border: 1px solid var(--md-outline); border-radius: var(--md-radius-sm);
+            background: var(--md-surface);
+        }
+        .lyric-source-row .ls-name { flex: 1; font-size: 13px; font-weight: 500; }
+        .lyric-source-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--md-primary); }
+        .lyric-source-row .ls-op { display: flex; gap: 2px; }
+        .lyric-source-row .btn-icon { width: 30px; height: 30px; }
+        .lyric-source-row .btn-icon .material-symbols-outlined { font-size: 19px; }
+        .lyric-content { margin-top: 8px; }
+        .lyric-pre {
+            white-space: pre-wrap; word-break: break-word; font-family: inherit;
+            font-size: 13px; line-height: 1.7; max-height: 46vh; overflow-y: auto;
+            background: var(--md-surface-1); border-radius: var(--md-radius-sm);
+            padding: 10px 12px; color: var(--md-on-surface);
+        }
+        .lyric-meta { font-size: 12px; color: var(--md-on-surface-variant); margin-bottom: 8px; }
+        .lyric-result-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 9px 8px; border-bottom: 1px solid var(--md-outline-variant);
+        }
+        .lyric-result-row:last-child { border-bottom: none; }
+        .lyric-result-meta { flex: 1; min-width: 0; }
+        .lyric-result-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .lyric-result-sub { font-size: 11px; color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
     </style>
     <script>
       (function () {
@@ -326,7 +355,9 @@
                 <option value="kg">酷狗音乐</option>
                 <option value="all">聚合搜索</option>
             </select>
-            <button class="btn-icon" id="configBtn2" title="插件设置(API Key / 音质 / 网易云登录 / 导入歌单链接)"><span class="material-symbols-outlined">settings</span></button>
+            <button class="btn-icon" id="searchLyricBtn" title="搜索歌词"><span class="material-symbols-outlined">lyrics</span></button>
+            <button class="btn-icon" id="currentLyricBtn" title="为当前播放歌曲获取歌词"><span class="material-symbols-outlined">queue_music</span></button>
+            <button class="btn-icon" id="configBtn2" title="插件设置(API Key / 音质 / 歌词接口 / 网易云登录 / 导入歌单链接)"><span class="material-symbols-outlined">settings</span></button>
         </header>
         <div class="browse-tabs" id="browseTabs"></div>
         <div class="browse" id="browse"><div class="browse-loading">加载中…</div></div>
@@ -353,6 +384,9 @@
                 <option value="128k">标准 (128 kbps)</option>
             </select>
             <div class="dialog-hint">网易云: lossless / exhigh / standard;QQ·酷狗: flac / 320k / 128k</div>
+            <label>歌词接口（优先级）</label>
+            <div class="dialog-hint">选中要启用的歌词接口，可用 ↑↓ 调整优先级；前面的接口优先尝试。</div>
+            <div id="lyricSourcesList" class="lyric-source-list"></div>
             <label>网易云登录</label>
             <div class="dialog-hint" id="wyLoginStatus">未登录</div>
             <div class="login-actions">
@@ -478,6 +512,31 @@
         <div class="sheet-footer">
             <button class="btn-text" id="createCancelBtn">取消</button>
             <button class="btn-filled" id="createConfirmBtn">创建并收藏</button>
+        </div>
+    </div>
+
+    <!-- ===== 歌词搜索 / 重新获取面板 ===== -->
+    <div class="menu-backdrop" id="lyricBackdrop" style="display:none"></div>
+    <div class="bottom-sheet" id="lyricSheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">歌词</div>
+        <div class="dialog-body">
+            <div id="lyricSearchBar">
+                <label for="lyricSearchInput">搜索歌名 / 歌手</label>
+                <input type="text" class="text-field" id="lyricSearchInput" placeholder="输入歌名或「歌手 歌名」搜索歌词" maxlength="100">
+                <button type="button" class="btn-filled" id="lyricSearchBtn" style="width:100%;margin-top:8px">搜索</button>
+            </div>
+            <div id="lyricResultBar">
+                <div style="display:flex;gap:8px;margin:10px 0 6px;align-items:center">
+                    <select class="select-field" id="lyricSource" style="flex:1;width:auto"></select>
+                    <button type="button" class="btn-filled" id="lyricRefetchBtn" style="white-space:nowrap">用此接口获取</button>
+                </div>
+            </div>
+            <div class="dialog-hint" id="lyricStatus"></div>
+            <div id="lyricContent" class="lyric-content"></div>
+        </div>
+        <div class="sheet-footer">
+            <button class="btn-text" id="lyricCloseBtn">关闭</button>
         </div>
     </div>
 

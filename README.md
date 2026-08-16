@@ -10,6 +10,7 @@
 - **小爱音箱语音点歌**：实现 miot 外部搜索源规范（`POST /api/search/topone`），安装后自动注册到 miot 插件配置页「外部搜索」下拉
 - **三平台合并搜索**：网易云 `163_search`、QQ `qq_music`、酷狗 `kugou_music` 并发搜索，单平台失败不影响整体
 - **严格音质映射**：按 ChKSz 官方参数表映射（`128k / 320k / flac` 三档，可配置），非法值不会被发出
+- **歌词搜索（多接口 + 优先级）**：支持 **LRCLIB / 网易云 / QQ音乐 / 酷狗** 四种歌词接口，可在设置中勾选启用的接口并调整优先级；宿主在歌曲无歌词时通过 `/lyric-search` 自动调用本插件获取；每首歌/当前播放歌曲均可点「歌词」按钮按指定接口重新获取
 
 ## 安装
 
@@ -36,7 +37,10 @@ https://raw.githubusercontent.com/882cherry/songloft-plugin-chksz/main/registry.
 | `POST /api/search/topone` | miot 外部搜索源规范：`{keyword, hint?, quality?}` → `{code, data}` |
 | `POST /api/playlist/import` | 导入平台歌单/榜单：`{platform, id, name?}` 或 `{url, name?}`（支持网易云/QQ/酷狗分享链接） → 自动入库并创建 Songloft 歌单 |
 | `GET /api/netease/login/qr` 等 | 网易云扫码 / 网页 Cookie 登录；登录后网易云优先走官方播放接口 |
-| `GET/POST /api/settings` | 插件设置（api_key / quality） |
+| `GET/POST /api/settings` | 插件设置（api_key / quality / lyric_sources 歌词接口优先级） |
+| `POST /lyric-search` | 宿主歌词提供者契约：`{title, artist?, album?, duration?, source?}` → `{lyric, lyric_source, title, artist}`；宿主在歌曲无歌词时自动调用 |
+| `POST /api/lyric/search` | 前端歌词搜索：`{keyword}` → `{results: [{source, title, artist, album, preview, lyric}]}`（跨所有已启用接口） |
+| `POST /api/lyric/fetch` | 为指定歌曲按指定接口/优先级获取歌词：`{song: {title, artist?, album?, duration?, source_data?}, source?}` → `{lyric, source, title, artist}` |
 
 ## 开发
 

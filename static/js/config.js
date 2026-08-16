@@ -4,10 +4,57 @@ import { api } from './api.js'
 import { snackbar } from './util.js'
 import { refreshNeteaseStatus } from './neteaseLogin.js'
 import { openLinkImport } from './importPlaylist.js'
+import { LYRIC_SOURCES } from './lyric.js'
 
 function el(id) { return document.getElementById(id) }
 
 let onSaved = null
+
+// ===== 歌词接口优先级列表 =====
+let lyricOrder = LYRIC_SOURCES.map((s) => s.code) // 当前顺序
+const lyricEnabled = {} // code -> bool
+
+function renderLyricSources(order) {
+  const box = el('lyricSourcesList')
+  if (!box) return
+  lyricOrder = order || lyricOrder
+  box.innerHTML = ''
+  lyricOrder.forEach((code, idx) => {
+    const src = LYRIC_SOURCES.find((s) => s.code === code)
+    if (!src) return
+    const row = document.createElement('div')
+    row.className = 'lyric-source-row'
+    const enabled = lyricEnabled[code] !== false
+    row.innerHTML =
+      '<input type="checkbox" ' + (enabled ? 'checked' : '') + '>' +
+      '<span class="ls-name">' + src.name + '</span>' +
+      '<span class="ls-op">' +
+      '<button type="button" class="btn-icon" title="上移" data-op="up"><span class="material-symbols-outlined">arrow_upward</span></button>' +
+      '<button type="button" class="btn-icon" title="下移" data-op="down"><span class="material-symbols-outlined">arrow_downward</span></button>' +
+      '</span>'
+    const cb = row.querySelector('input[type="checkbox"]')
+    cb.addEventListener('change', () => {
+      lyricEnabled[code] = cb.checked
+    })
+    row.querySelector('[data-op="up"]').addEventListener('click', () => {
+      if (idx === 0) return
+      lyricOrder.splice(idx, 1)
+      lyricOrder.splice(idx - 1, 0, code)
+      renderLyricSources(lyricOrder)
+    })
+    row.querySelector('[data-op="down"]').addEventListener('click', () => {
+      if (idx >= lyricOrder.length - 1) return
+      lyricOrder.splice(idx, 1)
+      lyricOrder.splice(idx + 1, 0, code)
+      renderLyricSources(lyricOrder)
+    })
+    box.appendChild(row)
+  })
+}
+
+function collectLyricSources() {
+  return lyricOrder.filter((code) => lyricEnabled[code] !== false)
+}
 
 export function initConfig(onConfigSaved) {
   onSaved = onConfigSaved || null
@@ -43,6 +90,11 @@ export function openConfig() {
       el('apiKeyHint').textContent = '已配置,留空保存则不修改'
     }
     if (data.quality) qEl.value = data.quality
+    // 歌词接口优先级
+    const savedOrder = data.lyric_sources || LYRIC_SOURCES.map((s) => s.code)
+    const merged = savedOrder.concat(LYRIC_SOURCES.map((s) => s.code).filter((c) => !savedOrder.includes(c)))
+    LYRIC_SOURCES.forEach((s) => { if (lyricEnabled[s.code] === undefined) lyricEnabled[s.code] = true })
+    renderLyricSources(merged)
   })
 }
 
@@ -59,6 +111,7 @@ function saveConfig() {
   const body = { quality: el('quality').value }
   const key = el('apiKey').value.trim()
   if (key) body.api_key = key
+  body.lyric_sources = collectLyricSources()
   api('api/settings', { method: 'POST', body: JSON.stringify(body) })
     .then((data) => {
       btn.disabled = false

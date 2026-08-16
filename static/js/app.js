@@ -9,6 +9,7 @@ import { initPlaylists } from './playlists.js'
 import { initBrowse } from './browse.js'
 import { initImportPlaylist } from './importPlaylist.js'
 import { initNeteaseLogin, refreshNeteaseStatus } from './neteaseLogin.js'
+import { initLyric } from './lyric.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -42,6 +43,9 @@ function init() {
 
   // 网易云登录(扫码 + 网页 Cookie)
   safe(initNeteaseLogin, 'neteaseLogin')
+
+  // 歌词搜索 / 重新获取
+  safe(initLyric, 'lyric')
 }
 
 // 等 DOM 就绪(module 脚本默认 defer,直接跑)

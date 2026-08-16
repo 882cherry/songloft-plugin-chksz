@@ -6,6 +6,7 @@ import { playSongs, addToQueue } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
 import { openConfig } from './config.js'
 import { hideBrowse } from './browse.js'
+import { openLyricForSong } from './lyric.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -229,6 +230,7 @@ function renderResults(results) {
     mkBtn('playlist_add', '加入队列').addEventListener('click', () => handle(item, 'queue'))
     mkBtn('favorite_border', '收藏到歌单').addEventListener('click', () => handle(item, 'fav'))
     mkBtn('library_add', '导入曲库').addEventListener('click', () => handle(item, 'import'))
+    mkBtn('lyrics', '查看/获取歌词').addEventListener('click', () => openLyricForSong(item))
     row.appendChild(actions)
     box.appendChild(row)
   })

@@ -5,6 +5,7 @@ import { snackbar, platformName, fmtTime } from './util.js'
 import { playSongs } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
 import { openImportPlaylist } from './importPlaylist.js'
+import { openLyricForSong } from './lyric.js'
 
 const TABS = [
   { code: 'wy', name: '网易云' },
@@ -246,6 +247,7 @@ function renderPlaylist(data, item) {
     }
     mkBtn('play_arrow', '播放').addEventListener('click', () => playBrowseSong(s))
     mkBtn('favorite_border', '收藏到歌单').addEventListener('click', () => importThen(s, 'fav'))
+    mkBtn('lyrics', '查看/获取歌词').addEventListener('click', () => openLyricForSong(s))
     row.appendChild(actions)
     box.appendChild(row)
   })
