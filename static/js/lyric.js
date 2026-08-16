@@ -314,7 +314,4 @@ export function initLyric() {
   const refetchBtn = el('lyricRefetchBtn')
   if (refetchBtn) refetchBtn.addEventListener('click', () => fetchForCurrentSong(el('lyricSource').value))
 
-  // 顶部「当前播放歌词」按钮(搜索栏)
-  const currentLyricBtn = el('currentLyricBtn')
-  if (currentLyricBtn) currentLyricBtn.addEventListener('click', openLyricForCurrent)
 }
