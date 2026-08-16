@@ -1,4 +1,4 @@
-// search.js — 搜索视图(平台多选)
+// search.js — 搜索视图(平台单选下拉:网易云 / QQ / 酷狗 / 聚合搜索)
 
 import { api, hasClientPlayer } from './api.js'
 import { setStatus, snackbar, platformName } from './util.js'
@@ -11,34 +11,47 @@ function el(id) { return document.getElementById(id) }
 
 // 平台选项(与后端 src/main.ts 的 ALL_PLATFORMS 对应)
 const PLATFORM_OPTIONS = [
-  { code: 'wy', name: '网易云' },
-  { code: 'tx', name: 'QQ' },
-  { code: 'kg', name: '酷狗' },
+  { code: 'wy', name: '网易云音乐' },
+  { code: 'tx', name: 'QQ音乐' },
+  { code: 'kg', name: '酷狗音乐' },
+]
+const MODE_OPTIONS = [
+  { code: 'wy', name: '网易云音乐', codes: ['wy'] },
+  { code: 'tx', name: 'QQ音乐', codes: ['tx'] },
+  { code: 'kg', name: '酷狗音乐', codes: ['kg'] },
+  { code: 'all', name: '聚合搜索', codes: PLATFORM_OPTIONS.map((p) => p.code) },
 ]
 const ALL_CODES = PLATFORM_OPTIONS.map((p) => p.code)
+let searchMode = 'all'
 let selectedPlatforms = [...ALL_CODES]
 
-// 渲染搜索平台多选下拉框(手机端更紧凑)
+function modeInfo(code) {
+  return MODE_OPTIONS.find((m) => m.code === code) || MODE_OPTIONS[MODE_OPTIONS.length - 1]
+}
+
+function applyMode(code) {
+  const m = modeInfo(code)
+  searchMode = m.code
+  selectedPlatforms = [...m.codes]
+}
+
+// 渲染搜索平台单选下拉框(网易云 / QQ / 酷狗 / 聚合搜索)
 function renderPlatformSelect() {
   const sel = el('platformSelect')
   if (!sel) return
-  Array.from(sel.options).forEach((o) => {
-    o.selected = selectedPlatforms.includes(o.value)
-  })
+  sel.value = searchMode
 }
 
 function bindPlatformSelect() {
   const sel = el('platformSelect')
   if (!sel) return
   sel.addEventListener('change', () => {
-    const next = Array.from(sel.selectedOptions).map((o) => o.value)
-      .filter((c) => ALL_CODES.includes(c))
-    if (!next.length) {
-      snackbar('至少保留一个搜索平台')
+    const next = sel.value
+    if (next !== 'wy' && next !== 'tx' && next !== 'kg' && next !== 'all') {
       renderPlatformSelect()
       return
     }
-    selectedPlatforms = next
+    applyMode(next)
     persistPlatforms()
   })
 }
@@ -49,14 +62,14 @@ function persistPlatforms() {
     .catch(() => {})
 }
 
-// 加载已保存的平台选择
+// 加载已保存的平台选择(单平台映射为对应模式,多平台回退为聚合搜索)
 function loadPlatforms() {
   api('api/settings')
     .then((data) => {
       if (data && Array.isArray(data.platforms) && data.platforms.length) {
         const clean = data.platforms.filter((c) => ALL_CODES.includes(c))
         if (clean.length) {
-          selectedPlatforms = clean
+          applyMode(clean.length === 1 ? clean[0] : 'all')
           renderPlatformSelect()
         }
       }
@@ -65,9 +78,7 @@ function loadPlatforms() {
 }
 
 function platformNames() {
-  return selectedPlatforms
-    .map((c) => (PLATFORM_OPTIONS.find((p) => p.code === c) || {}).name || c)
-    .join(' / ')
+  return modeInfo(searchMode).name
 }
 
 // 搜索入口定义为模块顶层全局:即使 initSearch 未执行,按钮/回车也能触发
