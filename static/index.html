@@ -65,6 +65,15 @@
             padding: 10px 14px; flex: 0 0 auto;
             z-index: 10;
         }
+        /* 搜索行控件统一高度,保证对齐 */
+        .search-bar .text-field,
+        .search-bar .btn-filled,
+        .search-bar .platform-select {
+            height: 40px; box-sizing: border-box;
+        }
+        .search-bar .btn-filled {
+            display: inline-flex; align-items: center; justify-content: center;
+        }
         .app-bar .app-icon {
             width: 34px; height: 34px; border-radius: 50%; border: none;
             background: rgba(127,127,157,.14); cursor: pointer;
@@ -117,6 +126,26 @@
         }
         .platform-select option {
             background-color: var(--md-surface); color: var(--md-on-surface);
+        }
+
+        /* 手机端:搜索行改为两行网格,避免下拉挤占搜索框 */
+        @media (max-width: 600px) {
+            .search-bar {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                grid-template-areas:
+                    "input search"
+                    "select settings";
+                gap: 8px;
+                padding: 8px 10px;
+            }
+            .search-bar .text-field { grid-area: input; }
+            .search-bar .btn-filled { grid-area: search; }
+            .search-bar .platform-select {
+                grid-area: select;
+                width: 100%; flex: 1 1 auto;
+            }
+            .search-bar .btn-icon { grid-area: settings; }
         }
 
         /* 平台多选 chips */
