@@ -85,10 +85,38 @@ async function saveNeteaseLogin(cookie: string, profile: any): Promise<void> {
   if (profile) await songloft.storage.set(WY_PROFILE_KEY, JSON.stringify(profile));
 }
 
-async function getNeteaseUserId(): Promise<string> {
-  const p = await getNeteaseProfile();
-  const v = p?.profile?.userId ?? p?.profile?.account?.id ?? p?.account?.id ?? p?.userId ?? p?.id;
+function extractNeteaseUserId(profile: any): string {
+  const v = profile?.profile?.userId ?? profile?.profile?.account?.id ?? profile?.account?.id ?? profile?.userId ?? profile?.id;
   return v ? String(v) : '';
+}
+
+/** 用 Cookie 调账号接口获取 userId / nickname / avatarUrl */
+async function fetchNeteaseAccountProfile(cookie: string): Promise<any> {
+  const d = await neteaseApiFetch('https://music.163.com/api/nuser/account/get', { cookie });
+  return d?.profile || d?.account || null;
+}
+
+/** 获取当前登录用户 id;旧版本扫码登录只存了昵称时,这里会兜底补齐 profile */
+async function getNeteaseUserId(): Promise<string> {
+  const cached = await getNeteaseProfile();
+  const cachedId = extractNeteaseUserId(cached);
+  if (cachedId) return cachedId;
+
+  const cookie = await getNeteaseCookie();
+  if (!cookie) return '';
+  try {
+    const profile = await fetchNeteaseAccountProfile(cookie);
+    if (!profile) return '';
+    await saveNeteaseLogin(cookie, {
+      profile,
+      nickname: profile?.nickname || cached?.nickname || cached?.profile?.nickname || '',
+      avatarUrl: profile?.avatarUrl || cached?.avatarUrl || cached?.profile?.avatarUrl || '',
+    });
+    return extractNeteaseUserId(profile);
+  } catch (e: any) {
+    songloft.log.warn(`[chksz] 补齐网易云登录用户信息失败: ${e?.message || e}`);
+  }
+  return '';
 }
 
 function neteaseCookieHeader(cookie: string): string {
@@ -484,7 +512,21 @@ router.get('/api/netease/login/qr/check', async (req) => {
     const cookie = (typeof d?.cookie === 'string' && d.cookie.trim()) ? d.cookie : full.setCookie;
     const code = Number(d?.code) || 0;
     if (code === 803 && cookie) {
-      await saveNeteaseLogin(cookie, d?.profile || { nickname: d?.nickname, avatarUrl: d?.avatarUrl });
+      // 扫码接口通常只返回 MUSIC_U 与昵称,不返回 userId;这里补调账号接口,
+      // 否则 /api/browse 无法展示「我喜欢的音乐 / 创建的歌单 / 收藏的歌单」。
+      let profile = d?.profile || null;
+      if (!extractNeteaseUserId(profile)) {
+        try {
+          profile = await fetchNeteaseAccountProfile(cookie);
+        } catch (e: any) {
+          songloft.log.warn(`[chksz] 扫码登录后获取用户信息失败: ${e?.message || e}`);
+        }
+      }
+      await saveNeteaseLogin(cookie, {
+        ...(profile && typeof profile === 'object' ? { profile } : {}),
+        nickname: profile?.nickname || d?.nickname || '',
+        avatarUrl: profile?.avatarUrl || d?.avatarUrl || '',
+      });
     }
     return jsonResponse({
       code,
@@ -568,8 +610,20 @@ router.post('/api/netease/login/cellphone', async (req) => {
     const { body: d, setCookie } = await neteaseCellphoneLogin(phone, countrycode, password);
     const code = Number(d?.code) || 0;
     if (code === 200 && setCookie) {
-      await saveNeteaseLogin(setCookie, d?.profile || d?.account || { nickname: d?.nickname || '', avatarUrl: d?.avatarUrl || '' });
-      return jsonResponse({ ok: true, logged_in: true, profile: d?.profile || d?.account || null });
+      let profile = d?.profile || d?.account || null;
+      if (!extractNeteaseUserId(profile)) {
+        try {
+          profile = await fetchNeteaseAccountProfile(setCookie);
+        } catch (e: any) {
+          songloft.log.warn(`[chksz] 网页登录后获取用户信息失败: ${e?.message || e}`);
+        }
+      }
+      await saveNeteaseLogin(setCookie, {
+        ...(profile && typeof profile === 'object' ? { profile } : {}),
+        nickname: profile?.nickname || d?.nickname || '',
+        avatarUrl: profile?.avatarUrl || d?.avatarUrl || '',
+      });
+      return jsonResponse({ ok: true, logged_in: true, profile: profile || null });
     }
     if (code === 200) {
       return jsonResponse({ error: '登录接口未返回 Cookie,请改用扫码或 Cookie 导入' }, 502);
@@ -594,9 +648,8 @@ router.post('/api/netease/login/cookie', async (req) => {
   const cookie = normalizeWYCookie(body.cookie);
   if (!cookie) return jsonResponse({ error: 'cookie required' }, 400);
   try {
-    const d = await neteaseApiFetch('https://music.163.com/api/nuser/account/get', { cookie });
-    const profile = d?.profile || d?.account || null;
-    if (!profile && !d?.profile) {
+    const profile = await fetchNeteaseAccountProfile(cookie);
+    if (!profile) {
       return jsonResponse({ error: 'Cookie 无效或已过期' }, 400);
     }
     await saveNeteaseLogin(cookie, { profile, nickname: profile?.nickname || '', avatarUrl: profile?.avatarUrl || '' });
