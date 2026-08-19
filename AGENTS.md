@@ -77,7 +77,12 @@ npm run dev              # 开发模式
 
 ### 1. 播放界面由宿主承担，插件做「遥控镜像」而非第二套播放器
 播放/解码/歌词/队列全部交给宿主播放器（Songloft web UI 底部播放条 / 客户端播放器原生支持 remote 歌曲）。插件在后端只负责：发现资源 → 导入 → `setQueue` 交给宿主 → snackbar 提示。播放器对象 `window.SongloftPlugin.player` 是**延迟注入**的，使用前需轮询等待（`player.js` 已有实现）。
-**例外（唯一允许的播放 UI）：`miniPlayer.js` 底部遥控镜像。** 宿主在插件 Tab / 设置页会隐藏其底部播放条（宿主 `shell_layout.dart`：`bottomPlayer: (isPluginTab || isSettings) ? null : …`，且桥接没有"显示播放条"的方法），导致插件内播放后无法暂停/停止。因此 v0.1.39 起在插件页底部渲染一条轻量浮层：监听宿主注入的 `songloft-player-state-change` 事件（三路渲染路径都会推）+ 初始化 `getState()` 兜底，仅镜像状态并转发 `togglePlay/prev/next/seek` 回宿主——不是第二套播放引擎。不要新增除它以外的播放界面（歌词页、队列页等继续留在宿主）。
+**例外（唯一允许的播放 UI）：`miniPlayer.js` 底部遥控镜像。** 宿主在插件 Tab / 设置页会隐藏其底部播放条（宿主 `shell_layout.dart`：`bottomPlayer: (isPluginTab || isSettings) ? null : …`，且桥接没有"显示播放条"的方法），导致插件内播放后无法暂停/停止。因此 v0.1.39 起在插件页底部渲染一条轻量浮层：监听宿主注入的 `songloft-player-state-change` 事件（三路渲染路径都会推）+ 初始化 `getState()` 兜底，仅镜像状态并转发 `togglePlay/prev/next/seek` 回宿主——不是第二套播放引擎。不要新增除它以外的播放界面（歌词页、队列页等继续留在宿主）。实现要点（踩坑积累）：
+- **用 `.view` 内页脚（`flex: 0 0 auto`）而非 `position: fixed`**：fixed 元素与 embed 滚动容器交叠会诱发滚动抖动/重排回路（宿主 theme.css #278 同类问题），且无法被内容顶起。
+- **播放/暂停按钮做「乐观翻转 + 宿主权威校正」**：点击立即切换图标（动效），宿主推送到达后按 `is_playing` 校正；宿主在部分客户端可能推送不及时。
+- **封面**：宿主 `current_song.cover_url` 常为空，导入时用 `rememberCover(id, url)` 写入 localStorage（`chksz_covers_v1`），镜像优先用记忆封面、失败则隐藏（不显示破图）。歌曲行「正在播放」态同理（`onPlaybackState` 总线，见铁律 1 player.js）。
+- **跳完整播放器**：Web/iframe 嵌入态下点击镜像封面/标题区设置 `parent.location.hash='#/player'`（同源 iframe 可驱动宿主 go_router；原生/WebF 无父窗口时忽略）。
+- 手机端搜索行自动隐藏（`initSearchBarAutoHide`）对两次切换加了 ≥320ms 冷却，避免「隐藏→布局高度变化→scrollTop 回弹→再显示」的抖动回路。
 
 ### 2. 宿主 embed 模式会隐藏 `.app-bar` 类
 宿主注入的 `components.css` 含 `html.embed .app-bar { display: none !important; }`（插件页以 iframe + `?embed` 方式嵌入宿主）。**页面顶部栏必须用 `.search-bar` 等自有类名，禁止 `.app-bar`**（历史教训：搜索框整行被宿主隐藏）。

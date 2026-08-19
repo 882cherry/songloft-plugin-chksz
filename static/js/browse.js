@@ -1,8 +1,8 @@
 // browse.js — 首页内容浏览(平台标签 + 猜你喜欢/推荐歌单/排行榜)
 
 import { api } from './api.js'
-import { snackbar, platformName, fmtTime } from './util.js'
-import { playSongs } from './player.js'
+import { snackbar, platformName, fmtTime, rememberCover } from './util.js'
+import { playSongs, togglePlayback, getCurrentPlayback, onPlaybackState } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
 import { openImportPlaylist } from './importPlaylist.js'
 import { openLyricForSong } from './lyric.js'
@@ -19,6 +19,7 @@ function el(id) { return document.getElementById(id) }
 let currentTab = 'wy'
 
 export function initBrowse() {
+  _wireBrowsePlayback()
   renderTabs()
   loadModules(currentTab)
 }
@@ -201,7 +202,13 @@ function renderPlaylist(data, item) {
       let done = 0, failed = 0
       const chain = allSongs.reduce((p, s) => p.then(() =>
         api('api/import', { method: 'POST', body: JSON.stringify({ song: s }) })
-          .then(() => done++)
+          .then((data) => {
+            if (data && data.ok && data.id) {
+              s._songId = data.id
+              rememberCover(data.id, s.cover_url)
+            }
+            done++
+          })
           .catch(() => failed++)
       ), Promise.resolve())
       chain.then(() => {
@@ -247,11 +254,38 @@ function renderPlaylist(data, item) {
       actions.appendChild(b)
       return b
     }
-    mkBtn('play_arrow', '播放').addEventListener('click', () => playBrowseSong(s))
+    const playBtn = mkBtn('play_arrow', '播放')
+    playBtn.addEventListener('click', () => playBrowseSong(s, playBtn))
     mkBtn('favorite_border', '收藏到歌单').addEventListener('click', () => importThen(s, 'fav'))
     mkBtn('lyrics', '查看/获取歌词').addEventListener('click', () => openLyricForSong(s))
+    row._item = s
+    row._playBtn = playBtn
     row.appendChild(actions)
     box.appendChild(row)
+  })
+  refreshBrowseRows()
+}
+
+// 刷新歌单详情行的播放/暂停样式(订阅一次)
+let browseSubscribed = false
+function refreshBrowseRows() {
+  const box = el('browse')
+  if (!box) return
+  const p = getCurrentPlayback()
+  const curId = p ? p.songId : null
+  const playing = p ? p.isPlaying : false
+  Array.prototype.forEach.call(box.querySelectorAll('.song-row'), (row) => {
+    const b = row._playBtn
+    if (!b) return
+    const id = row._item ? row._item._songId : null
+    const ic = b.querySelector('.material-symbols-outlined')
+    if (curId && id === curId) {
+      b.classList.add('playing')
+      if (ic) ic.textContent = playing ? 'pause' : 'play_arrow'
+    } else {
+      b.classList.remove('playing')
+      if (ic && ic.textContent !== 'play_arrow') ic.textContent = 'play_arrow'
+    }
   })
 }
 
@@ -269,16 +303,45 @@ function importThen(s, action) {
     .catch((e) => snackbar('导入失败:' + (e.message || e)))
 }
 
-function playBrowseSong(s) {
+function playBrowseSong(s, btn) {
+  // 正在播放的歌:点击 → 直接暂停/继续
+  if (s._songId) {
+    const p = getCurrentPlayback()
+    if (p && p.songId === s._songId) {
+      togglePlayback().catch(() => snackbar('宿主播放器不可用'))
+      return
+    }
+  }
+  function busy(on) {
+    if (btn) {
+      if (on) btn.classList.add('busy')
+      else btn.classList.remove('busy')
+    }
+  }
+  busy(true)
   api('api/import', { method: 'POST', body: JSON.stringify({ song: s }) })
     .then((data) => {
+      busy(false)
       if (!data || !data.ok || !data.id) {
         snackbar('导入失败:' + JSON.stringify(data))
         return
       }
+      s._songId = data.id
+      rememberCover(data.id, s.cover_url)
+      refreshBrowseRows()
       return playSongs([{ id: data.id, title: data.title || s.title }])
-        .then(() => snackbar('已开始播放: ' + (data.title || s.title)))
+        .then(() => {
+          snackbar('已开始播放: ' + (data.title || s.title))
+          refreshBrowseRows()
+        })
         .catch((e) => snackbar('播放失败:' + (e.message || e)))
     })
-    .catch((e) => snackbar('导入失败:' + (e.message || e)))
+    .catch((e) => { busy(false); snackbar('导入失败:' + (e.message || e)) })
+}
+
+// 播放态变化刷新浏览页(仅在宿主推送到达时触发,避免重复绑定)
+export function _wireBrowsePlayback() {
+  if (browseSubscribed) return
+  browseSubscribed = true
+  onPlaybackState(() => refreshBrowseRows())
 }

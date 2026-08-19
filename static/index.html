@@ -94,11 +94,21 @@
            2px 主色描边会永久残留(即「播放按钮阴影不退」)。图标按钮非键盘主操作,
            关闭其焦点描边;键盘可达性由点击后的 blur() 兜底 */
         .btn-icon:focus, .btn-icon:focus-visible { outline: none; }
-        /* touch 下 :hover 粘滞也会留下圆形底色/阴影,一并关掉 */
+        /* 按压缩放/底色反馈(touch 用 :active,不依赖会粘滞的 :hover) */
+        .btn-icon { transition: background .18s ease, transform .12s ease; }
+        .btn-icon:active { background: rgba(0,0,0,.08); transform: scale(.92); }
+        html[data-theme="dark"] .btn-icon:active { background: rgba(255,255,255,.12); }
+        /* touch 下 :hover 粘滞会留下圆形底色/阴影,关掉;动画交给 :active */
         @media (hover: none) {
             .btn-icon:hover { background: transparent; }
             .btn-filled:hover { box-shadow: none; }
             .btn-outlined:hover { background: transparent; }
+        }
+        /* 歌曲行动作按钮:正在播放的行高亮 + 点击导入/播放中的转圈动效 */
+        .song-actions .btn-icon.playing .material-symbols-outlined { color: var(--md-primary); }
+        @keyframes chksz-spin { to { transform: rotate(360deg); } }
+        .song-actions .btn-icon.busy .material-symbols-outlined {
+            animation: chksz-spin .9s linear infinite; color: var(--md-primary);
         }
         .btn-filled {
             padding: 9px 16px; border: 0; border-radius: var(--md-radius-sm);
@@ -367,26 +377,31 @@
            暂停/停止正在播放的歌。此浮层镜像宿主播放器状态并把控制转发回宿主,
            实际播放/解码/队列仍全部由宿主承担(见 miniPlayer.js)。 */
         .mini-player {
-            position: fixed; left: 0; right: 0; bottom: 0; z-index: 150;
+            /* 占用布局的页脚(不放 position:fixed):避免 WebF/embed 下 fixed 元素
+               与滚动容器交叠引发滚动抖动回路(参考宿主 theme.css #278 同款问题) */
+            flex: 0 0 auto;
             display: flex; align-items: center; gap: 10px;
-            padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+            padding: 8px 12px;
             background: var(--md-surface);
             border-top: 1px solid var(--md-outline-variant);
             box-shadow: 0 -4px 16px rgba(0,0,0,.10);
         }
         .mini-player .mp-cover {
             width: 44px; height: 44px; border-radius: 8px; object-fit: cover;
-            flex: 0 0 auto; background: var(--md-surface-variant);
+            flex: 0 0 auto; background: var(--md-surface-variant); cursor: pointer;
         }
-        .mini-player .mp-body { flex: 1; min-width: 0; }
+        .mini-player .mp-open { flex: 1; min-width: 0; text-align: left; cursor: pointer; }
+        .mini-player .mp-open:active { opacity: .7; }
         .mini-player .mp-title {
             display: block; font-size: 13px; font-weight: 600;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .mini-player .mp-sub {
-            display: block; font-size: 12px; color: var(--md-on-surface-variant);
+            display: flex; align-items: center; gap: 2px;
+            font-size: 12px; color: var(--md-on-surface-variant);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
         }
+        .mini-player .mp-sub .material-symbols-outlined { font-size: 14px; flex: 0 0 auto; }
         .mini-player .mp-progress {
             height: 4px; border-radius: 2px; background: var(--md-surface-variant);
             margin-top: 6px; cursor: pointer; position: relative;
@@ -398,9 +413,7 @@
         .mini-player .mp-controls .btn-icon { width: 36px; height: 36px; }
         .mini-player .mp-controls .btn-icon .material-symbols-outlined { font-size: 22px; }
         .mini-player .mp-play { width: 42px; height: 42px; background: var(--md-primary); color: var(--md-on-primary); }
-        /* 迷你播放条出现时,给可滚动容器底部留出空间,避免最后一项被遮住 */
-        body.has-mini-player .container { padding-bottom: 84px; }
-        body.has-mini-player .browse { padding-bottom: 120px; }
+        .mini-player .mp-play:active { opacity: .8; transform: scale(.92); }
 
         /* Snackbar */
         .snackbar {
@@ -480,6 +493,21 @@
         <div class="container" id="searchContainer" style="display:none">
             <div class="status muted" id="searchStatus"></div>
             <div id="results"></div>
+        </div>
+        <!-- 播放器遥控镜像:宿主在插件 Tab 隐藏底部播放条时的暂停/停止控制。
+             放在 .view 内作为页脚(非 fixed),点击封面/标题跳转宿主完整播放器 -->
+        <div id="miniPlayer" class="mini-player" style="display:none">
+            <img id="mpCover" class="mp-cover" alt="" referrerpolicy="no-referrer" src="">
+            <div class="mp-open" id="mpOpen" title="打开完整播放器">
+                <span id="mpTitle" class="mp-title">未播放</span>
+                <span id="mpArtist" class="mp-sub"></span>
+                <div id="mpProgress" class="mp-progress" title="点击跳转进度"><div id="mpProgressFill" class="mp-progress-fill"></div></div>
+            </div>
+            <div class="mp-controls">
+                <button type="button" class="btn-icon" id="mpPrevBtn" title="上一首"><span class="material-symbols-outlined">skip_previous</span></button>
+                <button type="button" class="btn-icon mp-play" id="mpPlayBtn" title="播放/暂停"><span class="material-symbols-outlined">play_arrow</span></button>
+                <button type="button" class="btn-icon" id="mpNextBtn" title="下一首"><span class="material-symbols-outlined">skip_next</span></button>
+            </div>
         </div>
     </div>
 
@@ -705,21 +733,6 @@
         </div>
         <div class="sheet-footer">
             <button class="btn-text" id="lyricCloseBtn">关闭</button>
-        </div>
-    </div>
-
-    <!-- ===== Songloft 播放器遥控镜像(宿主在插件 Tab 隐藏底部播放条时使用) ===== -->
-    <div id="miniPlayer" class="mini-player" style="display:none">
-        <img id="mpCover" class="mp-cover" alt="" referrerpolicy="no-referrer" src="">
-        <div class="mp-body">
-            <span id="mpTitle" class="mp-title">未播放</span>
-            <span id="mpArtist" class="mp-sub"></span>
-            <div id="mpProgress" class="mp-progress" title="点击跳转进度"><div id="mpProgressFill" class="mp-progress-fill"></div></div>
-        </div>
-        <div class="mp-controls">
-            <button type="button" class="btn-icon" id="mpPrevBtn" title="上一首"><span class="material-symbols-outlined">skip_previous</span></button>
-            <button type="button" class="btn-icon mp-play" id="mpPlayBtn" title="播放/暂停"><span class="material-symbols-outlined">play_arrow</span></button>
-            <button type="button" class="btn-icon" id="mpNextBtn" title="下一首"><span class="material-symbols-outlined">skip_next</span></button>
         </div>
     </div>
 

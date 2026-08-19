@@ -29,6 +29,7 @@ function initSearchBarAutoHide() {
   if (!bar) return
   const scrollEls = [el('browse'), el('searchContainer')].filter(Boolean)
   const lastTops = new WeakMap()
+  let lastToggleAt = 0
   scrollEls.forEach((scrollEl) => {
     lastTops.set(scrollEl, 0)
     let ticking = false
@@ -39,14 +40,29 @@ function initSearchBarAutoHide() {
         const st = scrollEl.scrollTop
         const last = lastTops.get(scrollEl) || 0
         const diff = st - last
-        if (st <= 0) {
-          bar.classList.remove('hide-search')
-        } else if (diff > 4) {
-          bar.classList.add('hide-search')
-        } else if (diff < -4) {
-          bar.classList.remove('hide-search')
-        }
         lastTops.set(scrollEl, st)
+        const now = Date.now()
+        // 冷却窗 > 动画时长(0.28s):避免「隐藏→高度变化→scrollTop 回调→再显示」抖动回路
+        if (now - lastToggleAt < 320) {
+          ticking = false
+          return
+        }
+        if (st <= 0) {
+          if (bar.classList.contains('hide-search')) {
+            bar.classList.remove('hide-search')
+            lastToggleAt = now
+          }
+        } else if (diff > 4) {
+          if (!bar.classList.contains('hide-search')) {
+            bar.classList.add('hide-search')
+            lastToggleAt = now
+          }
+        } else if (diff < -4) {
+          if (bar.classList.contains('hide-search')) {
+            bar.classList.remove('hide-search')
+            lastToggleAt = now
+          }
+        }
         ticking = false
       })
     }, { passive: true })

@@ -55,6 +55,27 @@ export function platformName(p) {
   return PLATFORM_NAME[p] || p || '未知'
 }
 
+// ===== 封面记忆 =====
+// 宿主把 remote 歌曲入库后 current_song.cover_url 常为空,而插件在导入时手里有封面。
+// 导入后把 songId → cover 记到 localStorage,供播放器遥控镜像兜底显示封面。
+const COVER_KEY = 'chksz_covers_v1'
+function coverMap() {
+  try { return JSON.parse(localStorage.getItem(COVER_KEY)) || {} } catch (e) { return {} }
+}
+export function rememberCover(id, url) {
+  if (!id || !url) return
+  try {
+    const m = coverMap()
+    if (m[id] === url) return
+    m[id] = url
+    localStorage.setItem(COVER_KEY, JSON.stringify(m))
+  } catch (e) { /* 存储不可用时静默 */ }
+}
+export function getCover(id) {
+  if (!id) return ''
+  try { return coverMap()[id] || '' } catch (e) { return '' }
+}
+
 /** 简易 sheet 开关 */
 export function bindSheet(backdropId, sheetId, openBtn, closeBtns) {
   const backdrop = document.getElementById(backdropId)

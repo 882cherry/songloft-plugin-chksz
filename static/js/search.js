@@ -1,8 +1,8 @@
 // search.js — 搜索视图(平台单选下拉:网易云 / QQ / 酷狗 / 聚合搜索)
 
 import { api, hasClientPlayer } from './api.js'
-import { setStatus, snackbar, platformName } from './util.js'
-import { playSongAppend, addToQueue } from './player.js'
+import { setStatus, snackbar, platformName, rememberCover } from './util.js'
+import { playSongAppend, addToQueue, togglePlayback, getCurrentPlayback, onPlaybackState } from './player.js'
 import { openPlaylistPicker } from './playlists.js'
 import { openConfig } from './config.js'
 import { hideBrowse } from './browse.js'
@@ -161,7 +161,13 @@ function renderBatchImport(results) {
     setStatus(st, '正在导入 0/' + total + '…')
     const chain = results.reduce((p, item) => p.then(() =>
       api('api/import', { method: 'POST', body: JSON.stringify({ song: item }) })
-        .then(() => { done++; setStatus(st, '正在导入 ' + done + '/' + total + '…') })
+        .then((data) => {
+          if (data && data.ok && data.id) {
+            item._songId = data.id
+            rememberCover(data.id, item.cover_url)
+          }
+          done++; setStatus(st, '正在导入 ' + done + '/' + total + '…')
+        })
         .catch(() => { failed++ })
     ), Promise.resolve())
     chain.then(() => {
@@ -229,26 +235,81 @@ function renderResults(results) {
       actions.appendChild(b)
       return b
     }
-    mkBtn('play_arrow', '播放').addEventListener('click', () => handle(item, 'play'))
+    const playBtn = mkBtn('play_arrow', '播放')
+    playBtn.addEventListener('click', () => handle(item, 'play', playBtn))
     mkBtn('playlist_add', '加入队列').addEventListener('click', () => handle(item, 'queue'))
     mkBtn('favorite_border', '收藏到歌单').addEventListener('click', () => handle(item, 'fav'))
     mkBtn('library_add', '导入曲库').addEventListener('click', () => handle(item, 'import'))
     mkBtn('lyrics', '查看/获取歌词').addEventListener('click', () => openLyricForSong(item))
+    // 记住行与对应歌曲供「正在播放的行高亮成暂停」刷新
+    row._item = item
+    row._playBtn = playBtn
     row.appendChild(actions)
     box.appendChild(row)
+  })
+  ensureRowSubscription()
+  refreshRowPlayState()
+}
+
+// 播放状态总线:订阅一次,宿主播放态变化时刷新所有结果行的播放/暂停样式
+let rowSubscribed = false
+function ensureRowSubscription() {
+  if (rowSubscribed) return
+  rowSubscribed = true
+  onPlaybackState(() => refreshRowPlayState())
+}
+function refreshRowPlayState() {
+  const box = el('results')
+  if (!box) return
+  const p = getCurrentPlayback()
+  const curId = p ? p.songId : null
+  const playing = p ? p.isPlaying : false
+  Array.prototype.forEach.call(box.querySelectorAll('.song-row'), (row) => {
+    const b = row._playBtn
+    if (!b) return
+    const id = row._item ? row._item._songId : null
+    const ic = b.querySelector('.material-symbols-outlined')
+    if (curId && id === curId) {
+      b.classList.add('playing')
+      if (ic) ic.textContent = playing ? 'pause' : 'play_arrow'
+    } else {
+      b.classList.remove('playing')
+      if (ic && ic.textContent !== 'play_arrow') ic.textContent = 'play_arrow'
+    }
   })
 }
 
 /** 先导入曲库拿到 song id,再按动作处理 */
-function handle(item, action) {
+function handle(item, action, btn) {
   const st = el('searchStatus')
+  // 正在播放的歌:点播放按钮 → 直接切换暂停/继续,不再重复导入
+  if (action === 'play' && item._songId) {
+    const p = getCurrentPlayback()
+    if (p && p.songId === item._songId) {
+      setStatus(st, p.isPlaying ? '已暂停' : '已继续播放', 'ok')
+      togglePlayback().catch((e) => setStatus(st, '宿主播放器不可用:' + (e.message || e), 'err'))
+      return
+    }
+  }
+  function busy(on) {
+    if (btn) {
+      if (on) btn.classList.add('busy')
+      else btn.classList.remove('busy')
+    }
+  }
   setStatus(st, '处理中…')
+  busy(true)
   api('api/import', { method: 'POST', body: JSON.stringify({ song: item }) })
     .then(async (data) => {
+      busy(false)
       if (!data || !data.ok || !data.id) {
         setStatus(st, '导入失败:' + JSON.stringify(data), 'err')
         return
       }
+      // 记录 songId→封面,供播放器遥控镜像兜底显示封面(宿主不返回封面)
+      item._songId = data.id
+      rememberCover(data.id, item.cover_url)
+      refreshRowPlayState()
       const song = { id: data.id, title: data.title || item.title, artist: item.artist, album: item.album, cover_url: item.cover_url }
       if (action === 'play') {
         try {
@@ -256,6 +317,7 @@ function handle(item, action) {
           // 播放界面由宿主承担(底部播放条/客户端播放器)
           setStatus(st, '已开始播放:' + song.title, 'ok')
           snackbar('已开始播放: ' + song.title)
+          refreshRowPlayState()
         } catch (e) {
           setStatus(st, '已导入曲库,宿主播放器不可用:' + (e.message || e), 'err')
         }
@@ -275,5 +337,5 @@ function handle(item, action) {
         snackbar('已导入曲库')
       }
     })
-    .catch((e) => setStatus(st, '导入失败:' + (e.message || e), 'err'))
+    .catch((e) => { busy(false); setStatus(st, '导入失败:' + (e.message || e), 'err') })
 }
