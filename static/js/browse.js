@@ -219,7 +219,7 @@ function renderPlaylist(data, item) {
     })
   }
 
-  ;(data.songs || []).forEach((s) => {
+  ;(data.songs || []).forEach((s, i) => {
     const row = document.createElement('div')
     row.className = 'song-row'
     if (s.cover_url) {
@@ -255,7 +255,7 @@ function renderPlaylist(data, item) {
       return b
     }
     const playBtn = mkBtn('play_arrow', '播放')
-    playBtn.addEventListener('click', () => playBrowseSong(s, playBtn))
+    playBtn.addEventListener('click', () => playBrowseSong(s, playBtn, i, allSongs))
     mkBtn('favorite_border', '收藏到歌单').addEventListener('click', () => importThen(s, 'fav'))
     mkBtn('lyrics', '查看/获取歌词').addEventListener('click', () => openLyricForSong(s))
     row._item = s
@@ -303,7 +303,7 @@ function importThen(s, action) {
     .catch((e) => snackbar('导入失败:' + (e.message || e)))
 }
 
-function playBrowseSong(s, btn) {
+function playBrowseSong(s, btn, index, allSongs) {
   // 正在播放的歌:点击 → 直接暂停/继续
   if (s._songId) {
     const p = getCurrentPlayback()
@@ -319,24 +319,41 @@ function playBrowseSong(s, btn) {
     }
   }
   busy(true)
-  api('api/import', { method: 'POST', body: JSON.stringify({ song: s }) })
-    .then((data) => {
-      busy(false)
-      if (!data || !data.ok || !data.id) {
-        snackbar('导入失败:' + JSON.stringify(data))
-        return
-      }
-      s._songId = data.id
-      rememberCover(data.id, s.cover_url)
-      refreshBrowseRows()
-      return playSongs([{ id: data.id, title: data.title || s.title }])
-        .then(() => {
-          snackbar('已开始播放: ' + (data.title || s.title))
-          refreshBrowseRows()
-        })
-        .catch((e) => snackbar('播放失败:' + (e.message || e)))
-    })
-    .catch((e) => { busy(false); snackbar('导入失败:' + (e.message || e)) })
+  // 歌单内播放:先把整张歌单都导入曲库,再整单 setQueue 从点击的这首开始播放
+  const songs = Array.isArray(allSongs) && allSongs.length ? allSongs : [s]
+  let done = 0
+  const ids = new Array(songs.length).fill(null)
+  const chain = songs.reduce((p, song, i) => p.then(() =>
+    api('api/import', { method: 'POST', body: JSON.stringify({ song }) })
+      .then((data) => {
+        if (data && data.ok && data.id) {
+          song._songId = data.id
+          ids[i] = data.id
+          rememberCover(data.id, song.cover_url)
+        }
+        done++
+        if (songs.length > 1 && (done === songs.length || done % 10 === 0)) {
+          snackbar('正在导入歌单 ' + done + '/' + songs.length)
+        }
+      })
+      .catch(() => { done++ })
+  ), Promise.resolve())
+  chain.then(() => {
+    busy(false)
+    const playable = songs.map((song, i) => ids[i] ? { id: ids[i], title: song.title || '' } : null).filter(Boolean)
+    if (!playable.length) {
+      snackbar('导入失败,无法播放')
+      return
+    }
+    const start = Math.min(index || 0, playable.length - 1)
+    refreshBrowseRows()
+    playSongs(playable, start)
+      .then(() => {
+        snackbar('已开始播放 ' + playable.length + ' 首: ' + (s.title || ''))
+        refreshBrowseRows()
+      })
+      .catch((e) => { snackbar('播放失败:' + (e.message || e)) })
+  })
 }
 
 // 播放态变化刷新浏览页(仅在宿主推送到达时触发,避免重复绑定)
