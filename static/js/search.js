@@ -223,6 +223,9 @@ function renderResults(results) {
       b.className = 'btn-icon'
       b.title = title
       b.innerHTML = '<span class="material-symbols-outlined">' + icon + '</span>'
+      // 点击后主动释放焦点:避免宿主注入的 :focus-visible 圆环在 WebF/touch 下
+      // 点击后永久残留(「播放按钮阴影不退」),配合 index.html 的 outline:none 兜底
+      b.addEventListener('click', () => { try { b.blur() } catch (_) { /* ignore */ } })
       actions.appendChild(b)
       return b
     }

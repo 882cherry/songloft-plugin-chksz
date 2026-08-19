@@ -10,6 +10,7 @@ import { initBrowse } from './browse.js'
 import { initImportPlaylist } from './importPlaylist.js'
 import { initNeteaseLogin, refreshNeteaseStatus } from './neteaseLogin.js'
 import { initLyric } from './lyric.js'
+import { initMiniPlayer } from './miniPlayer.js'
 
 function el(id) { return document.getElementById(id) }
 
@@ -76,6 +77,9 @@ function init() {
 
   // 歌词搜索 / 重新获取
   safe(initLyric, 'lyric')
+
+  // 播放器遥控镜像(宿主在插件 Tab 隐藏底部播放条时的暂停/停止控制)
+  safe(initMiniPlayer, 'miniPlayer')
 
   // 手机端搜索行自动隐藏/显示
   safe(initSearchBarAutoHide, 'searchBarAutoHide')

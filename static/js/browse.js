@@ -242,6 +242,8 @@ function renderPlaylist(data, item) {
       b.className = 'btn-icon'
       b.title = title
       b.innerHTML = '<span class="material-symbols-outlined">' + icon + '</span>'
+      // 点击后主动释放焦点,避免宿主注入的 :focus-visible 圆环残留(同 search.js)
+      b.addEventListener('click', () => { try { b.blur() } catch (_) { /* ignore */ } })
       actions.appendChild(b)
       return b
     }

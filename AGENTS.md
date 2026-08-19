@@ -75,8 +75,9 @@ npm run dev              # 开发模式
 
 ## 关键架构决策与踩坑（铁律）
 
-### 1. 播放界面由宿主承担，插件不做播放 UI
-播放/进度/歌词/队列全部交给宿主播放器（Songloft web UI 底部播放条 / 客户端播放器原生支持 remote 歌曲）。**不要新增插件内播放界面**（playerScreen / miniPlayer / 歌词页等已移除）。插件只负责：发现资源 → 导入 → `setQueue` 交给宿主 → snackbar 提示。播放器对象 `window.SongloftPlugin.player` 是**延迟注入**的，使用前需轮询等待（`player.js` 已有实现）。
+### 1. 播放界面由宿主承担，插件做「遥控镜像」而非第二套播放器
+播放/解码/歌词/队列全部交给宿主播放器（Songloft web UI 底部播放条 / 客户端播放器原生支持 remote 歌曲）。插件在后端只负责：发现资源 → 导入 → `setQueue` 交给宿主 → snackbar 提示。播放器对象 `window.SongloftPlugin.player` 是**延迟注入**的，使用前需轮询等待（`player.js` 已有实现）。
+**例外（唯一允许的播放 UI）：`miniPlayer.js` 底部遥控镜像。** 宿主在插件 Tab / 设置页会隐藏其底部播放条（宿主 `shell_layout.dart`：`bottomPlayer: (isPluginTab || isSettings) ? null : …`，且桥接没有"显示播放条"的方法），导致插件内播放后无法暂停/停止。因此 v0.1.39 起在插件页底部渲染一条轻量浮层：监听宿主注入的 `songloft-player-state-change` 事件（三路渲染路径都会推）+ 初始化 `getState()` 兜底，仅镜像状态并转发 `togglePlay/prev/next/seek` 回宿主——不是第二套播放引擎。不要新增除它以外的播放界面（歌词页、队列页等继续留在宿主）。
 
 ### 2. 宿主 embed 模式会隐藏 `.app-bar` 类
 宿主注入的 `components.css` 含 `html.embed .app-bar { display: none !important; }`（插件页以 iframe + `?embed` 方式嵌入宿主）。**页面顶部栏必须用 `.search-bar` 等自有类名，禁止 `.app-bar`**（历史教训：搜索框整行被宿主隐藏）。
@@ -103,7 +104,7 @@ npm run dev              # 开发模式
 - 宿主 `SongloftPlugin` 桥（getAuthToken/apiGet/apiPost/...）在 iframe 加载后注入，前端初始化需容错（模块 try/catch 隔离，见 `app.js`）
 
 ### 7. 前端模块约定
-- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台多选下拉框；`browse.js` 首页平台标签+歌单详情操作（网易云登录后含个人歌单模块）；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`neteaseLogin.js` 网易云扫码/官方 URS 网页组件（手机验证码+手机密码）/Cookie 登录；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`api.js` 请求封装；`util.js` 工具
+- `app.js` 入口（safe 隔离各模块）；`search.js` 搜索+平台多选下拉框；`browse.js` 首页平台标签+歌单详情操作（网易云登录后含个人歌单模块）；`importPlaylist.js` 平台歌单导入宿主（确认弹窗）；`neteaseLogin.js` 网易云扫码/官方 URS 网页组件（手机验证码+手机密码）/Cookie 登录；`playlists.js` 收藏歌单（调宿主 `/api/v1/playlists` API，走用户 token）；`config.js` 设置弹窗；`player.js` 仅播放操作（setQueue/addToQueue）；`miniPlayer.js` 底部遥控镜像（见铁律 1）；`api.js` 请求封装；`util.js` 工具
 - 收藏歌单走宿主 API：`GET/POST /api/v1/playlists`（创建需 `{name, type:"normal"}`）、`POST /api/v1/playlists/{id}/songs`（`{song_ids:[..]}`，服务端去重）、`GET /api/v1/playlists/{id}/song-ids`
 - 未配置 API Key 时点击搜索 → 自动打开配置弹窗（`openConfig`）
 
