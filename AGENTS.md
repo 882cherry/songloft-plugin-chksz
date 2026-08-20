@@ -83,6 +83,7 @@ npm run dev              # 开发模式
 - **封面**：宿主 `current_song.cover_url` 常为空，导入时用 `rememberCover(id, url)` 写入 localStorage（`chksz_covers_v1`），镜像优先用记忆封面、失败则隐藏（不显示破图）。歌曲行「正在播放」态同理（`onPlaybackState` 总线，见铁律 1 player.js）。
 - **跳完整播放器**：Web/iframe 嵌入态下点击镜像封面/标题区设置 `parent.location.hash='#/player'`（同源 iframe 可驱动宿主 go_router）。**非嵌入态（原生 App / WebF，无父窗口）点击则展开 `#mpSheet` 大面板**（更大封面+进度时间+控制），`.show` 用 rAF + 50ms 定时器双保险触发（后台标签/WebF 会节流 rAF）。
 - **歌单内播放**：歌单详情里点任一行的播放，先把整张歌单全部 `api/import` 入库、再 `playSongs(全部, startIndex=行号)` 整单替换队列并从该行开始（不要只导入单曲）。
+- **播放模式/播放列表**：迷你条与展开面板的控制行 = `[播放模式][上一曲][播放/暂停][下一曲][播放列表]`。播放模式面板列出宿主 5 种模式（order/loop/single/random/singlePlay，图标 format_list_numbered/repeat/repeat_one/shuffle/looks_one）→ `setPlayMode`；播放列表面板渲染 `state.queue`、按 `current_index` 高亮、点击行 → `player.play(songId)`（宿主 `playSong` 对已在队列的歌曲直接跳到该 index）。两张面板复用 `.bottom-sheet` + `.menu-backdrop`，显隐用 rAF+50ms 定时器兜底。
 - 手机端搜索行自动隐藏（`initSearchBarAutoHide`）对两次切换加了 ≥320ms 冷却，避免「隐藏→布局高度变化→scrollTop 回弹→再显示」的抖动回路。
 
 ### 2. 宿主 embed 模式会隐藏 `.app-bar` 类

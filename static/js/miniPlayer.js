@@ -64,6 +64,27 @@ export function initMiniPlayer() {
   const p2PlayBtn = el('mp2PlayBtn')
   const p2PrevBtn = el('mp2PrevBtn')
   const p2NextBtn = el('mp2NextBtn')
+  // 播放模式 / 播放列表
+  const MODES = [
+    { key: 'order', name: '顺序播放', icon: 'format_list_numbered' },
+    { key: 'loop', name: '列表循环', icon: 'repeat' },
+    { key: 'single', name: '单曲循环', icon: 'repeat_one' },
+    { key: 'random', name: '随机播放', icon: 'shuffle' },
+    { key: 'singlePlay', name: '单曲播放', icon: 'looks_one' },
+  ]
+  const MODE_ICON = {}
+  MODES.forEach((m) => { MODE_ICON[m.key] = m.icon })
+  const modeBtn = el('mpModeBtn')
+  const p2ModeBtn = el('mp2ModeBtn')
+  const listBtn = el('mpListBtn')
+  const p2ListBtn = el('mp2ListBtn')
+  const modeSheet = el('mpModeSheet')
+  const modeBackdrop = el('mpModeBackdrop')
+  const modeListEl = el('mpModeList')
+  const mpListSheet = el('mpListSheet')
+  const listBackdrop = el('mpListBackdrop')
+  const mpListTitle = el('mpListTitle')
+  const mpPlaylistBody = el('mpPlaylistBody')
 
   let state = null
   let pos = 0 // 本地播放进度(秒),每 1s 自走
@@ -161,6 +182,112 @@ export function initMiniPlayer() {
     fill.style.width = pct + '%'
     if (p2Fill) p2Fill.style.width = pct + '%'
     if (p2Time) p2Time.textContent = fmt(pos) + ' / ' + fmt(dur)
+    // 播放模式图标
+    const modeIcon = MODE_ICON[state.play_mode] || 'repeat'
+    if (modeBtn) { const mi = modeBtn.querySelector('.material-symbols-outlined'); if (mi) mi.textContent = modeIcon }
+    if (p2ModeBtn) { const mi = p2ModeBtn.querySelector('.material-symbols-outlined'); if (mi) mi.textContent = modeIcon }
+    // 面板开着时同步当前态高亮
+    if (modeSheet && modeSheet.classList.contains('show')) renderModeList()
+    if (mpListSheet && mpListSheet.classList.contains('show')) renderPlaylist()
+  }
+
+  // ===== 播放模式面板 =====
+  function renderModeList() {
+    if (!modeListEl) return
+    const cur = state ? state.play_mode : 'order'
+    modeListEl.innerHTML = ''
+    MODES.forEach((m) => {
+      const row = document.createElement('div')
+      row.className = 'mp-mode-row' + (m.key === cur ? ' on' : '')
+      row.innerHTML =
+        '<span class="mpm-icon"><span class="material-symbols-outlined">' + m.icon + '</span></span>' +
+        '<span class="mpm-name"></span>' +
+        (m.key === cur ? '<span class="material-symbols-outlined mpm-check">check</span>' : '')
+      row.querySelector('.mpm-name').textContent = m.name
+      row.addEventListener('click', () => {
+        call('setPlayMode', [m.key])
+        hideModeSheet()
+      })
+      modeListEl.appendChild(row)
+    })
+  }
+  function showModeSheet() {
+    if (!modeSheet) return
+    if (modeBackdrop) modeBackdrop.style.display = 'block'
+    renderModeList()
+    const addShow = () => modeSheet.classList.add('show')
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(addShow)
+    setTimeout(addShow, 50)
+  }
+  function hideModeSheet() {
+    if (!modeSheet) return
+    if (modeBackdrop) modeBackdrop.style.display = 'none'
+    modeSheet.classList.remove('show')
+  }
+
+  // ===== 播放列表面板 =====
+  function renderPlaylist() {
+    if (!mpPlaylistBody) return
+    const q = (state && Array.isArray(state.queue)) ? state.queue : []
+    const curIndex = state ? state.current_index : -1
+    if (mpListTitle) mpListTitle.textContent = '播放列表' + (q.length ? '（' + q.length + ' 首）' : '')
+    mpPlaylistBody.innerHTML = ''
+    if (!q.length) {
+      mpPlaylistBody.innerHTML = '<div class="empty-state">队列为空</div>'
+      return
+    }
+    q.forEach((song, i) => {
+      const on = i === curIndex
+      const row = document.createElement('div')
+      row.className = 'mp-list-row' + (on ? ' current' : '')
+      // 封面(用 DOM 设 src,避免 URL 里的引号注入)
+      const src = getCover(song.id) || song.cover_url || ''
+      if (src) {
+        const img = document.createElement('img')
+        img.className = 'mp-list-cover'
+        img.referrerPolicy = 'no-referrer'
+        img.alt = ''
+        img.addEventListener('error', () => img.style.display = 'none')
+        img.src = src
+        row.appendChild(img)
+      } else {
+        const ph = document.createElement('span')
+        ph.className = 'mp-list-cover mp-list-cover-ph'
+        ph.innerHTML = '<span class="material-symbols-outlined">music_note</span>'
+        row.appendChild(ph)
+      }
+      const meta = document.createElement('div')
+      meta.className = 'mp-list-meta'
+      meta.innerHTML = '<div class="mp-list-title"></div><div class="mp-list-sub"></div>'
+      meta.querySelector('.mp-list-title').textContent = song.title || '未知歌曲'
+      meta.querySelector('.mp-list-sub').textContent = [song.artist, song.album].filter(Boolean).join(' · ')
+      row.appendChild(meta)
+      if (on) {
+        const eq = document.createElement('span')
+        eq.className = 'material-symbols-outlined mp-list-playing'
+        eq.textContent = 'graphic_eq'
+        eq.title = '正在播放'
+        row.appendChild(eq)
+      }
+      row.addEventListener('click', () => {
+        // 已在队列中 → 宿主 playSong 会直接跳到该 index 并播放(见宿主 playSong)
+        call('play', [song.id])
+      })
+      mpPlaylistBody.appendChild(row)
+    })
+  }
+  function showListSheet() {
+    if (!mpListSheet) return
+    if (listBackdrop) listBackdrop.style.display = 'block'
+    renderPlaylist()
+    const addShow = () => mpListSheet.classList.add('show')
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(addShow)
+    setTimeout(addShow, 50)
+  }
+  function hideListSheet() {
+    if (!mpListSheet) return
+    if (listBackdrop) listBackdrop.style.display = 'none'
+    mpListSheet.classList.remove('show')
   }
 
   function syncTimer() {
@@ -232,6 +359,15 @@ export function initMiniPlayer() {
   bind(p2PlayBtn, togglePlayIcon)
   bind(p2PrevBtn, () => call('prev'))
   bind(p2NextBtn, () => call('next'))
+  // 播放模式 / 播放列表(迷你条 + 展开面板共用同一套面板)
+  bind(modeBtn, showModeSheet)
+  bind(p2ModeBtn, showModeSheet)
+  bind(listBtn, showListSheet)
+  bind(p2ListBtn, showListSheet)
+
+  // 面板关闭
+  if (modeBackdrop) modeBackdrop.addEventListener('click', hideModeSheet)
+  if (listBackdrop) listBackdrop.addEventListener('click', hideListSheet)
 
   // 点击封面/标题区 → 打开完整播放器(嵌入态跳父窗口 /player;非嵌入态展开面板)
   if (open) {
